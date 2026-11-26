@@ -199,9 +199,12 @@ class Processor:
                 if m:
                     return value[:m.end()] + "[RELATIVE]"
             return ROLE_PLACEHOLDER[role]
+        if role == C.DISTRICT and POLICY["location_level"] == "none" and isinstance(value, str):
+            self.role_counts["VILLAGE"] += 1
+            return "[LOCATION]"
         if role in (C.VILLAGE, C.TEHSIL):        # location_level: district
             self.role_counts["VILLAGE"] += 1
-            district = (ctx or {}).get(C.DISTRICT)
+            district = (ctx or {}).get(C.DISTRICT) if POLICY["location_level"] == "district" else None
             return district if district else "[LOCATION]"
         if role == C.PIN:
             d = digits_only(str(value))
@@ -444,7 +447,7 @@ class Processor:
 
 
 def _whole_digit_run(text: str, s: int, e: int) -> bool:
-    """True if text[s:e] is not part of a longer number / ID (e.g. the '00151' inside 'OPD/26/01/00151')."""
+    """True if text[s:e] is not part of a longer number / ID (e.g. the '00987' inside 'OPD/31/07/00987')."""
     before = text[max(0, s - 1):s]
     after = text[e:e + 1]
     return not re.match(r"[0-9/\-.]", before or " ") and not re.match(r"[0-9/\-.]", after or " ")

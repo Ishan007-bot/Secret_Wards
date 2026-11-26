@@ -65,53 +65,33 @@ CLINICAL_WORDS = {
 }
 
 # ----------------------------------------------------------------------------------------------
-# a general first-name gazetteer (pan-Indian; used as a soft signal only, never as the only rule)
-FIRST_NAMES = set("""
-aarav aditya ajay akash akhil alok amar amit amitabh anand anil ankit anoop anuj anurag arjun arun ashok
-ashish avinash balram bharat bhola brijesh chandan chetan deepak dev dharmendra dhiraj dilip dinesh
-gaurav girish gopal govind hari harish hemant hitesh jagdish jai jitendra kailash kamal kamlesh kapil
-karan kishan kishore krishna kuldeep lalit mahendra mahesh manish manoj mohan mukesh naresh naveen
-nitin om pankaj pawan prakash pramod pradeep prashant raghav rahul rajan rajesh rajiv rakesh ram ramesh
-ravi rohit sachin sandeep sanjay santosh satish shailesh shankar shiv shyam subhash sudhir sunil suresh
-tarun umesh vijay vikas vikram vinod vipin vishal vivek yash yogesh ashok raju babloo pappu munna
-anita anjali archana asha babita bharti chanda deepa durga gayatri geeta guddi hema indu jyoti kamla
-kanchan kavita kiran kusum lakshmi lata manju meena meera mamta neelam neha nisha poonam pooja priya
-pushpa radha rani rekha renu rina reena ritu sangeeta sapna sarita savita seema shanti sheela shobha
-shweta sita sunita sushma suman urmila usha vandana vimla parvati kamini malti phoolmati ramkali
-mohammad mohammed muhammad ahmad ahmed ali arif asif aslam azhar faisal farhan imran irfan javed
-kalim khalid naseem nadeem rashid rizwan salim saleem shahid shakeel sohail tariq wasim zubair yusuf
-zakir anwar akbar iqbal mustafa usman aamir sameer shabbir fatima fatma ayesha zainab salma shabana
-rukhsar nazia nasreen parveen rehana shaheen sultana yasmin zeenat farida hina sana tabassum
-gurpreet harpreet jaspreet manpreet simran sukhwinder kuldeep jasbir gurmeet harjeet balwinder
-paramjit amarjit lakhwinder navjot ranjit
-anthony joseph john thomas george mathew peter paul mary maria grace elizabeth susan agnes
-arumugam murugan senthil karthik ganesh venkatesh srinivas lakshmanan subramanian raman ramesh
-selvam saravanan balaji kannan vel ilavenil kaveri meenakshi lalitha kalaivani valli priya
-sourav subhajit debashish arnab abhijit anirban partha tapas sanjib ranjan shyamal bapi rupa
-mousumi sharmistha tanushree swati moumita
-tenzin tsering dolma pema karma lobsang dawa wangmo nima sonam
-""".split())
+# name gazetteer (soft CRF feature only): built by training/build_gazetteer.py from Faker en_IN/hi_IN
+# and a team list, with every practice-data name removed. Loaded from rakshak/data/*.txt.
+def _load(name: str) -> set:
+    from pathlib import Path
+    p = Path(__file__).resolve().parent.parent / "data" / name
+    try:
+        return {l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")}
+    except OSError:
+        return set()
 
-SURNAMES = set("""
-sharma verma gupta agarwal agrawal bansal goel mittal jain singh yadav kumar mishra tiwari tripathi
-pandey dubey dwivedi trivedi chaturvedi shukla srivastava saxena mathur nigam kulshrestha asthana
-chauhan rathore thakur rajput sisodia tomar bhadoria parmar solanki patel shah mehta desai joshi
-kushwaha maurya kurmi lodhi lodh nishad kewat mallah paswan chamar jatav valmiki pasi kori rawat
-prajapati kumhar vishwakarma lohar sonar soni swarnkar teli sahu gupta chaudhary chaudhari choudhary
-jat gurjar meena bairwa ansari siddiqui qureshi khan pathan shaikh sheikh malik mirza beg rizvi
-naqvi zaidi hashmi farooqui usmani alvi abbasi saifi idrisi mansoori bano begum khatoon
-gill sandhu sidhu dhillon grewal brar bedi kaur arora khanna kapoor malhotra chopra bhatia sethi
-masih david fernandes dsouza pinto gomes rodrigues
-iyer iyengar nair menon pillai reddy rao naidu chetty gowda shetty hegde nambiar namboodiri kurup
-subramaniam krishnan raman pandian mudaliar
-bhattacharya chatterjee banerjee mukherjee ganguly das dutta ghosh bose sen roy saha paul mondal
-biswas sarkar majumdar
-qadri bhutia lepcha sherpa wangmo lama tamang gurung
-""".split())
+
+FIRST_NAMES = _load("first_names.txt")
+SURNAMES = _load("surnames.txt")
 
 # ----------------------------------------------------------------------------------------------
 # district / state names are kept (coarse, and a preserve value); they must never enter the vault
-REGION_WORDS = {
-    "uttar", "pradesh", "up", "india", "bihar", "lucknow", "kanpur", "delhi", "barabanki", "sultanpur",
-    "sitapur", "hardoi", "unnao", "bahraich", "rae", "bareli", "raebareli", "gonda", "faizabad", "ayodhya",
-}
+REGION_WORDS = set("""
+uttar pradesh up india bihar delhi agra aligarh amethi amroha auraiya ayodhya azamgarh baghpat
+bahraich ballia balrampur banda barabanki bareilly basti bhadohi bijnor budaun bulandshahr chandauli chitrakoot
+deoria etah etawah farrukhabad fatehpur firozabad noida ghaziabad ghazipur gonda gorakhpur
+hamirpur hapur hardoi hathras jalaun jaunpur jhansi kannauj kanpur dehat kasganj kaushambi kushinagar lakhimpur
+kheri lalitpur lucknow maharajganj mahoba mainpuri mathura mau meerut mirzapur moradabad muzaffarnagar
+pilibhit pratapgarh prayagraj allahabad rae bareli raebareli rampur saharanpur sambhal shahjahanpur
+shamli shravasti siddharthnagar sitapur sonbhadra sultanpur unnao varanasi faizabad
+andhra arunachal assam chhattisgarh goa gujarat haryana himachal jharkhand karnataka kerala madhya maharashtra
+manipur meghalaya mizoram nagaland odisha orissa punjab rajasthan sikkim tamil nadu telangana tripura
+uttarakhand west bengal jammu kashmir ladakh puducherry pondicherry chandigarh mumbai kolkata chennai bengaluru
+bangalore hyderabad pune ahmedabad jaipur patna guwahati bhubaneswar thiruvananthapuram kochi surat indore
+nagpur dehradun ranchi raipur shimla srinagar
+""".split())

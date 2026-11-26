@@ -17,9 +17,14 @@ location_level: district     # village / mohalla / tehsil -> district
 pin_prefix_digits: 3         # 229073 -> 229***
 
 # --- rare values / k-anonymity ----------------------------------------------
-k_anonymity: 3               # patients in a (gender, age band, district) cell smaller than this...
-age_band_wide_years: 20      # ...get this wider (still truthful) age band in all their records
+k_anonymity: 5               # patients in a (gender, age band, district) cell smaller than this...
+age_band_wide_years: 30      # ...get this wider (still truthful) age band in all their records
+                             # (sweep, tools/policy_sweep.py: k=3/20y 92.7 -> k=5/30y 94.5 projected)
 rare_diagnosis_k: 2          # diagnoses held by a single patient -> ICD-10 chapter (k=3 measured: 2.3% medical loss)
 
 # --- ingestion safety ------------------------------------------------------
 max_json_depth: 200          # deeper JSON is quarantined
+
+# --- self-trained CRF tagger (rakshak/ml, models/ner_crf.json) ----------------
+ml_tagger: on                # off = rules only. Acceptance gate passed (training/pipeline_eval.py):
+                             # free-text-only names leaked 15.6% -> 1.4%, non-PII words kept unchanged

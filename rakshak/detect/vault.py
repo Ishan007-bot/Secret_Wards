@@ -133,7 +133,7 @@ class Vault:
 
 
 def id_shape(value: str) -> str | None:
-    """'SNJ/26/064127' -> regex 'SNJ[-/ _]?\\d{2}[-/ _]?\\d{6}' (prefix literal, digit counts, any separator)."""
+    """'KGH/31/998877' -> regex 'KGH[-/ _]?\\d{2}[-/ _]?\\d{6}' (prefix literal, digit counts, any separator)."""
     v = value.strip()
     parts = re.findall(r"[A-Za-z]+|\d+", v)
     if not parts or sum(len(p) for p in parts if p.isdigit()) < 4:

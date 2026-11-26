@@ -28,7 +28,7 @@ PLACEHOLDER = {
     "PATIENT": "[PATIENT]", "RELATIVE": "[RELATIVE]", "PHONE": "[PHONE]", "PHONE_MASKED": "[PHONE]",
     "AADHAAR": "[AADHAAR]", "AADHAAR_MASKED": "[AADHAAR]", "ABHA_NUMBER": "[ABHA]", "ABHA_ADDRESS": "[ABHA]",
     "PAN": "[PAN]", "EMAIL": "[EMAIL]", "INSURANCE_ID": "[INSURANCE_ID]", "MRN": "[ID]", "ADDRESS": "[ADDRESS]",
-    "VILLAGE": "[LOCATION]", "PIN": "[PIN]", "DOB": "[DOB]",
+    "VILLAGE": "[LOCATION]", "PIN": "[PIN]", "DOB": "[DOB]", "NAME": "[NAME]",
 }
 
 
@@ -272,6 +272,8 @@ class Engine:
 
         protected = [(m.start(), m.end()) for rx in _PROTECT for m in rx.finditer(text)]   # L5
         spans.extend(_phone_proximity_names(text, spans))                                 # L3b
+        if POLICY.get("ml_tagger") == "on":                                               # L4 (CRF)
+            spans.extend(_crf_spans(text))
         uuids = [(m.start(), m.end()) for m in _UUID.finditer(text)]
         if uuids:  # resource ids / references are random UUIDs: never personal data, never touched
             spans = [s for s in spans if not any(us <= s.start and s.end <= ue for us, ue in uuids)]
@@ -354,7 +356,7 @@ class Engine:
             self.counts[sp.kind] += 1
             pos = sp.end
             if sp.kind in ("PATIENT", "RELATIVE"):
-                # "Kamal Bhaiya", "Anita ji": the kinship/honorific word is part of the name mention
+                # "Ojas Bhaiya", "Charvi ji": the kinship/honorific word is part of the name mention
                 m = _HON_AFTER.match(text, pos)
                 if m and (i + 1 >= len(spans) or spans[i + 1].start >= m.end()):
                     pos = m.end()
@@ -362,6 +364,8 @@ class Engine:
         return "".join(out)
 
     def _replacement(self, sp: Span, surface: str, rec) -> str:
+        if sp.kind == "ADDRESS" and sp.src == "label":
+            return _generalise_address(surface)
         if sp.repl is not None:
             if rec is not None and sp.kind == "AGE":
                 rec.generalized = True
@@ -423,6 +427,78 @@ def _phone_proximity_names(text: str, spans: list[Span]) -> list[Span]:
 def _fold_key(s: str) -> str:
     from .textnorm import fold
     return fold(s)
+
+
+_ADDR_SPLIT = re.compile(r"(\s*[,;|]\s*|\s+-\s+)")
+_ADDR_REGION_PREFIX = re.compile(r"^(?:jila|zila|district|distt?\.?|dist\.?|state|जिला|ज़िला)\s*[:.]?\s*", re.I)
+
+
+def _generalise_address(value: str) -> str:
+    """Address line -> house / locality / village / tehsil removed, district and state kept (they are
+    released on purpose, location_level: district), PIN cut to its prefix. Fails closed."""
+    out = []
+    for part in _ADDR_SPLIT.split(value):
+        if not part or _ADDR_SPLIT.fullmatch(part):
+            out.append(part)
+            continue
+        core = part.strip(" .")
+        d = ascii_digits(core)
+        if re.fullmatch(r"\d{6}", d):
+            n = int(POLICY["pin_prefix_digits"])
+            out.append(d[:n] + "*" * (6 - n))
+            continue
+        rest = _ADDR_REGION_PREFIX.sub("", core)
+        words = re.findall(r"[A-Za-z]+|[ऀ-ॿ]+", rest)
+        if words and not re.search(r"\d", rest) and all(_region_word(w) for w in words):
+            out.append(part)
+            continue
+        out.append("[ADDRESS]")
+    text = "".join(out)
+    return re.sub(r"\[ADDRESS\](?:\s*(?:[,;|]|\s-)\s*\[ADDRESS\])+", "[ADDRESS]", text)
+
+
+def _region_word(w: str) -> bool:
+    if is_devanagari(w):
+        from ..link.translit import deva_to_latin
+        w = deva_to_latin(w)
+    return w.lower() in L.REGION_WORDS
+
+
+_SENTENCE = re.compile(r"[a-zऀ-ॿ]{3,}")
+_CRF_KIND = {"NAME": "NAME", "ADDR": "ADDRESS"}
+_DEVA_CUE = re.compile(r"(?:नाम|मरीज़?|रोगी|पिता|पति|पत्नी|माता|पुत्र|पुत्री|पता|ग्राम|गाँव|गांव|मोहल्ला|मकान|श्री|श्रीमती|"
+                       r"S/o|W/o|D/o|C/O)\s*(?:का|की|के)?\s*(?:नाम)?\s*[:\-]?\s*$")
+
+
+def _deva_gaz(w: str) -> bool:
+    from ..link.translit import deva_to_latin
+    lw = deva_to_latin(w).lower()
+    return w in L.FIRST_NAMES or w in L.SURNAMES or lw in L.FIRST_NAMES or lw in L.SURNAMES
+
+
+def _crf_spans(text: str) -> list[Span]:
+    """Self-trained CRF (rakshak/ml): extra NAME / ADDR recall on free text, lowest priority.
+    Never on structured cells (needs sentence-like text), never over protected clinical terms
+    (resolved by L5), never a span made only of clinical / context words."""
+    if len(text) < 20 or not _SENTENCE.search(text):
+        return []
+    from ..ml import tagger
+    from ..ml.features import CONTEXT_VOCAB
+    out = []
+    for s, e, typ, _p in tagger.get().spans(text):
+        words = re.findall(r"[A-Za-z]+|[ऀ-ॿ]+", text[s:e])
+        if not words:
+            continue
+        if all(w.lower() in L.CLINICAL_WORDS or w.lower() in CONTEXT_VOCAB or w.lower() in L.REGION_WORDS
+               for w in words):
+            continue
+        if typ == "NAME" and not any(w[0].isupper() or is_devanagari(w) for w in words):
+            continue
+        if all(is_devanagari(w) for w in words) and not (
+                _DEVA_CUE.search(text[max(0, s - 40):s]) or any(_deva_gaz(w) for w in words)):
+            continue  # Devanagari has no capital letters: demand a label / relation cue or a known name
+        out.append(Span(s, e, _CRF_KIND.get(typ, "NAME"), 0, src="crf"))
+    return out
 
 
 def _resolve(spans: list[Span], protected: list[tuple[int, int]]) -> list[Span]:

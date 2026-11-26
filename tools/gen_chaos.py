@@ -113,8 +113,8 @@ def main() -> int:
         else:
             dmap[t] = pair(extra)[1]
             extra += 1
-    lat_rx = re.compile(r"(?<![A-Za-z])(" + "|".join(sorted(map(re.escape, lmap), key=len, reverse=True)) + r")(?![A-Za-z])",
-                        re.I)
+    lat_rx = re.compile(r"(?<![A-Za-z])(" + "|".join(sorted(map(re.escape, lmap), key=len, reverse=True)) + r")(?![A-Za-z])(?!\s+workers?)",
+                        re.I)  # "ASHA worker" is a job title (a meaning trap), not the name Asha
     dev_rx = re.compile("(" + "|".join(sorted(map(re.escape, dmap), key=len, reverse=True)) + ")")
 
     def case_like(src: str, new: str) -> str:

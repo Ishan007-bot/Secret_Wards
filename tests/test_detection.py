@@ -35,8 +35,8 @@ class IdentifierTests(unittest.TestCase):  # T-ID
         return out
 
     def test_phones(self):
-        for p in ["+91 72864 90658", "+91-8069773173", "75600-10034", "060062-72163", "8081120924",
-                  "6069109411", "७५६००१००३४"]:
+        for p in ["+91 72864 90658", "+91-8099123456", "75600-10034", "060062-72163", "8077712345",
+                  "6012398745", "७५६००१००३४"]:
             self.gone(f"Mob: {p}", p)
 
     def test_aadhaar_abha_pan_email_insurance(self):
@@ -44,10 +44,10 @@ class IdentifierTests(unittest.TestCase):  # T-ID
         self.gone("uid 5185-9480-8328", "5185-9480-8328")
         self.gone("XXXX XXXX 5866", "5866")
         self.gone("ABHA 91-7938-3729-8403", "91-7938-3729-8403")
-        self.gone("PAN DCSPS3454E ok", "DCSPS3454E")
+        self.gone("PAN QWRTY9876K ok", "QWRTY9876K")
         self.gone("mail a.b9@example.com", "a.b9@example.com")
-        self.gone("PMJAY-UP-3398744800", "3398744800")
-        self.gone("POL/33/83255643", "83255643")
+        self.gone("PMJAY-UP-5566778899", "5566778899")
+        self.gone("POL/41/90817263", "90817263")
 
     def test_learned_id_shapes_and_cores(self):
         e = engine_with_vault()
@@ -75,9 +75,9 @@ class NameTests(unittest.TestCase):  # T-NM
         e = Engine()
         self.assertNotIn("Zoravar", e.clean("Patient Name: Zoravar Teklu        Age/Sex: 52 Yrs/F"))
         self.assertNotIn("Ilango", e.clean("W/o Ilango Perumal\nAddress: x"))
-        self.assertNotIn("Perumal", e.clean("C/O Ilango Perumal, H.No. 12"))
-        self.assertNotIn("Nambiar", e.clean("called by Kaveri Nambiar 94054-71434"))
-        self.assertNotIn("Qadri", e.clean("18:40 - Zorawar Qadri (attendant, bed 12), mob 6910522119"))
+        self.assertNotIn("Perumal", e.clean("C/O Ilango Perumal, H.No. 77"))
+        self.assertNotIn("Kolappan", e.clean("called by Vardhini Kolappan 94054-71434"))
+        self.assertNotIn("Tirkey", e.clean("18:40 - Ekansh Tirkey (attendant, bed 12), mob 6987001122"))
         self.assertNotIn("Ngurthansanga", e.clean("Visitor Ngurthansanga Hmar came at 18:00, mob 9612233445"))
 
     def test_relation_does_not_cross_lines(self):
@@ -87,7 +87,7 @@ class NameTests(unittest.TestCase):  # T-NM
 
 
 class MeaningTrapTests(unittest.TestCase):  # T-KP
-    KEEP = ["Dr. Ramesh Srivastava reviewed the patient.", "C/O fever for 6 days", "C/O pain abdomen x 7 days",
+    KEEP = ["Dr. Hemant Srivastava reviewed the patient.", "C/O fever for 6 days", "C/O pain abdomen x 7 days",
             "1-0-1", "Dolo 650 BD x 5 days", "Ramipril 5 mg", "450 mg + 300 mg", "K/C/O addison's disease",
             "K/C/O DM2 x 9 yrs", "H/O TB 8 yrs back", "Parkinson's disease", "Bell's palsy",
             "Ward 4 (Medicine) / Bed 29", "Referred by ASHA worker of the village", "BP 128/85 mmHg",
@@ -101,9 +101,9 @@ class MeaningTrapTests(unittest.TestCase):  # T-KP
 
     def test_doctor_kept_relative_removed(self):
         e = engine_with_vault()
-        e.vault.add_name("Ramesh Yadav", "RELATIVE")
-        out = e.clean("Attendant: Ramesh Yadav. Dr. Ramesh Srivastava reviewed the patient.")
-        self.assertIn("Dr. Ramesh Srivastava", out)
+        e.vault.add_name("Hemant Kujur", "RELATIVE")
+        out = e.clean("Attendant: Hemant Kujur. Dr. Hemant Srivastava reviewed the patient.")
+        self.assertIn("Dr. Hemant Srivastava", out)
         self.assertNotIn("Yadav", out)
 
     def test_age_band_truthful(self):
