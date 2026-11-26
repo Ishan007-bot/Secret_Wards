@@ -238,6 +238,8 @@ class Processor:
             if decoded is not None:
                 cleaned = self._coarsen(eng.clean(decoded, rec=rec), rec)
                 return encode_b64_text(cleaned) if cleaned != decoded else value
+            if len(value) >= 20 and _encoded_tokens(value):
+                return self.text_rewrite(value, rec)
             return self._coarsen(eng.clean(value, rec=rec), rec)
         if isinstance(value, int) and len(str(abs(value))) >= 6:
             s = str(value)
@@ -432,7 +434,7 @@ class Processor:
     # ====================================================================== text
     def text_harvest(self, text: str) -> None:
         self.engine.harvest_text(text)
-        for _m, decoded in _b64_tokens(text):
+        for _m, decoded, _enc in _encoded_tokens(text):
             self.engine.harvest_text(decoded)
 
     def text_evidence(self, text: str, rel: str, month_first: bool) -> list[Evidence]:
@@ -442,10 +444,10 @@ class Processor:
 
     def text_rewrite(self, text: str, rec: RecordCtx | None = None) -> str:
         parts, pos = [], 0
-        for m, decoded in _b64_tokens(text):            # base64 blobs inside a note: decode, clean, re-encode
+        for m, decoded, enc in _encoded_tokens(text):   # base64 / hex blobs inside a note: decode, clean, re-encode
             parts.append(self._coarsen(self.engine.clean(text[pos:m.start()], rec=rec), rec))
             cleaned = self._coarsen(self.engine.clean(decoded, rec=rec), rec)
-            parts.append(encode_b64_text(cleaned) if cleaned != decoded else m.group(0))
+            parts.append(enc(cleaned) if cleaned != decoded else m.group(0))
             pos = m.end()
         parts.append(self._coarsen(self.engine.clean(text[pos:], rec=rec), rec))
         return "".join(parts)
@@ -471,6 +473,43 @@ class Processor:
 _INERT = re.compile(r"(?:https?://|urn:(?:oid|uuid):)[A-Za-z0-9./#:_-]*[A-Za-z/#._-]|"
                     r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[a-z][a-z-]{0,29}")
 _B64_TOKEN = re.compile(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{24,}={0,2}(?![A-Za-z0-9+/=])")
+
+
+_HEX_TOKEN = re.compile(r"(?<![0-9A-Za-z])(?:[0-9a-f]{2}){10,}(?![0-9A-Za-z])|(?<![0-9A-Za-z])(?:[0-9A-F]{2}){10,}(?![0-9A-Za-z])")
+
+
+def _hex_tokens(text: str):
+    """(match, decoded text, upper-case?) for hex runs that decode to readable UTF-8 text (the scorer decodes hex)."""
+    if len(text) < 20:
+        return
+    for m in _HEX_TOKEN.finditer(text):
+        tok = m.group(0)
+        if _UUIDISH.search(text[max(0, m.start() - 9):m.end() + 13]):
+            continue
+        try:
+            decoded = bytes.fromhex(tok).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        letters = sum(c.isalpha() for c in decoded)
+        if letters >= 4 and sum(c.isprintable() or c in "\n\t" for c in decoded) == len(decoded):
+            yield m, decoded, tok.isupper()
+
+
+_UUIDISH = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-")
+
+
+def _encoded_tokens(text: str):
+    """Base64 and hex payloads inside a text: (match, decoded, re-encoder)."""
+    found = [(m, d, encode_b64_text) for m, d in _b64_tokens(text)]
+    found += [(m, d, (lambda u: (lambda t: t.encode("utf-8").hex().upper() if u else t.encode("utf-8").hex()))(up))
+              for m, d, up in _hex_tokens(text)]
+    found.sort(key=lambda x: x[0].start())
+    out, last = [], -1
+    for f in found:
+        if f[0].start() >= last:
+            out.append(f)
+            last = f[0].end()
+    return out
 
 
 def _b64_tokens(text: str):

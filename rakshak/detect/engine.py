@@ -50,7 +50,7 @@ _P = [
     ("PHONE_MASKED", r"(?<!\d)[6-9]\d[Xx*]{5,6}\d{2,3}(?!\d)", 0),
     ("ABHA_NUMBER", r"(?<!\d)\d{2}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}(?!\d)", 0),
     ("AADHAAR", r"(?<!\d)[2-9]\d{3}[\s-]?\d{4}[\s-]?\d{4}(?!\d)", 0),
-    ("PHONE", r"(?<![\d+])(?:(?:\+|00)?91[\s-]?|0)?[6-9]\d(?:[\s-]?\d){8}(?!\d)", 0),
+    ("PHONE", r"(?<![\d+])(?:(?:\+|00)?91[\s.-]?|0)?[6-9]\d(?:[\s.-]?\d){8}(?![\d.]\d)", 0),
     ("PAN", r"(?<![A-Za-z0-9])[A-Z]{5}\d{4}[A-Z](?![A-Za-z0-9])", 0),
     ("INSURANCE_ID", r"(?<![A-Za-z0-9])(?:AB-?)?PM-?JAY[-\s/]?[A-Z]{2}[-\s/]?\d{6,12}(?!\d)", re.I),
     ("INSURANCE_ID", r"(?<![A-Za-z0-9])POL(?:ICY)?[-/ ]?\d{2,4}[-/ ]\d{6,10}(?!\d)", re.I),
@@ -70,6 +70,7 @@ _LBL_NAME = (r"(?:Patient(?:'s|s)?\s*(?:Full\s*)?Name|Pt\.?\s*(?:Full\s*)?Name|N
 _LBL_REL = (r"(?:Attendant|Informant|Guardian|Father'?s?\s*Name|Husband'?s?\s*Name|Mother'?s?\s*Name|"
             r"Spouse(?:'s)?\s*Name|Spouse|Next\s+of\s+Kin|Relative(?:'s)?\s*Name|Relative|Caller|"
             r"Accompanied\s+by|Brought\s+by|Escort|Rishtedar|Parijan|Kin|Emergency\s+Contact(?:\s+Name)?|"
+            r"Husband|Wife|Father|Mother|Son|Daughter|Brother|Sister|Pati|Pita|Mata|"
             r"पति\s+का\s+नाम|पिता\s+का\s+नाम|माता\s+का\s+नाम|परिजन)")
 _LBL_REL_NOCOLON = r"(?:called\s+by|raised\s+by|witnessed\s+by|referred\s+by\s+(?!Dr)|brought\s+by|accompanied\s+by)"
 _LBL_ID = (r"(?:UHID|MRN|MR\s*No\.?|Reg(?:istration)?\.?\s*(?:No|Number|ID)\.?|Patient\s*ID|IPD\s*No\.?|"
@@ -143,6 +144,17 @@ _NON_PERSON_BEFORE_LABEL = re.compile(
 _VILLAGE_BAD_BEFORE = re.compile(r"\d\s*$")
 
 # generic "<Word(s)> No / # / ID :" labels whose value looks like an identifier
+RX_LANDLINE = re.compile(r"(?<![A-Za-z])(?:Tel(?:ephone)?|Landline|Ph(?:one)?|Contact|Mob(?:ile)?|Fax)\.?\s*"
+                         r"(?:No\.?|Number)?\s*[:：\-–]?\s*(\(?0\d{2,4}\)?[\s-]?\d{6,8})(?!\d)", re.I)
+RX_ID_LABEL_LOOSE = re.compile(r"(?<![A-Za-z])(?:(?:UHID|MRN|Regn|Registration)\.?[ \t]*(?:No\.?|Number|#|ID)?|"
+                               r"(?:Reg|IPD?|OPD?|CR|Policy|Card|Member|Beneficiary|File|Case|Ref(?:erence)?|Folio|"
+                               r"Unique)\.?[ \t]*(?:No\.?|Number|#|ID)(?![A-Za-z]))[ \t]*[:：\-–#]?[ \t]*"
+                               r"(?=[A-Za-z0-9/\-]*\d)", re.I)
+RX_HONORIFIC_NAME = re.compile(r"(?<![A-Za-z])(?:Smt|Shri|Sh|Shrimati|Sushri|Kumari|Km|Mr|Mrs|Ms|Miss|Late|Master|Baby)\.?"
+                               r"[ \t]+((?:[A-Z][a-z]+|[A-Z]\.)(?:[ \t]+(?:[A-Z][a-z]+|[A-Z]\.)){0,3})")
+RX_HONORIFIC_DEVA = re.compile(rf"(?<![{DEVA}])(?:श्रीमती|श्री|सुश्री|कुमारी|स्व\.)[ \t]+([{DEVA}]+(?:[ \t]+[{DEVA}]+){{0,2}})")
+_INSTITUTION_AFTER = re.compile(r"^[^\n]{0,40}?\b(?:Hospital|Clinic|Nursing|Medical|Trust|Memorial|Charitable|College|"
+                                r"Institute|Centre|Center|Pharmacy|Diagnostics|Labs?|अस्पताल|चिकित्सालय)\b", re.I)
 RX_GENERIC_ID_LABEL = re.compile(r"(?<![A-Za-z])((?:[A-Z][A-Za-z.]{1,15}\s*){1,3})(?:No\.?|Number|#|ID|Id)\s*[:：\-–]\s*")
 _NOT_PATIENT_ID_LABEL = re.compile(r"\b(?:Bill|Invoice|Sample|Visit|Trip|Ticket|Bed|Ward|Room|Lot|Batch|Order|Test|"
                                    r"Package|Claim|Receipt|Token|Serial|Sr|S\.?No|Item|Page|Version)\b", re.I)
@@ -226,10 +238,12 @@ class Engine:
                 self.vault.add_address(value)
             elif kind == "VILLAGE":
                 self.vault.add_text(value, "VILLAGE")
+            elif kind == "NAME":
+                self.vault.add_name(value, "RELATIVE")
 
     def _label_values(self, text: str):
         for kind, (s, e) in self._label_spans(text):
-            if kind in ("PATIENT", "RELATIVE", "MRN", "ADDRESS", "VILLAGE"):
+            if kind in ("PATIENT", "RELATIVE", "MRN", "ADDRESS", "VILLAGE", "NAME"):
                 yield kind, text[s:e]
 
     # ------------------------------------------------------------------ pass 2: find spans
@@ -307,6 +321,10 @@ class Engine:
                 s, e = _cut_value(text[m.end():])
                 val = text[m.end() + s:m.end() + e]
                 if _looks_like_name(val):
+                    tail = _SURNAME_FIRST.match(text, m.end() + e)
+                    if tail and (val.isupper() or len(val.split()) == 1) and tail.group(1).lower() not in \
+                            L.CLINICAL_WORDS | L.REGION_WORDS:
+                        e = tail.end() - m.end()                  # "KUMAR, RAMESH" / "Sharma, Anita"
                     yield kind, (m.end() + s, m.end() + e)
         for m in RX_RELATION.finditer(text):
             marker = m.group(0)[:3].lower()
@@ -324,6 +342,29 @@ class Engine:
             v = re.match(r"[A-Za-z0-9](?:[A-Za-z0-9/_.\-]|:(?=[A-Za-z0-9]))*", text[m.end():])
             if v and re.search(r"\d", v.group(0)):
                 yield "MRN", (m.end(), m.end() + len(v.group(0).rstrip(".-/")))
+        for m in RX_ID_LABEL_LOOSE.finditer(text):             # "Reg No. 2026/OPD/00456", "IP No 26/1234"
+            v = re.match(r"[A-Za-z0-9](?:[A-Za-z0-9/_\-]|[.:](?=[A-Za-z0-9]))*", text[m.end():])
+            if v and len(re.findall(r"\d", v.group(0))) >= 4 and not _NOT_PATIENT_ID_LABEL.search(m.group(0)):
+                yield "MRN", (m.end(), m.end() + len(v.group(0)))
+        for m in RX_LANDLINE.finditer(text):
+            yield "PHONE", (m.start(1), m.end(1))
+        for rx in (RX_HONORIFIC_NAME, RX_HONORIFIC_DEVA):                # "Smt. Kamla Devi", "श्रीमती कमला"
+            for m in rx.finditer(text):
+                if _INSTITUTION_AFTER.match(text[m.start(1):m.start(1) + 60]):
+                    continue                                          # "Shri Ram Hospital" is a place
+                words = re.findall(r"[A-Za-z]+|[ऀ-ॿ]+", m.group(1))
+                if all(w.lower() in L.CLINICAL_WORDS or w.lower() in L.REGION_WORDS for w in words):
+                    continue
+                end = m.end(1)
+                toks = list(re.finditer(r"\S+", m.group(1)))
+                for i, t in enumerate(toks):                 # "कमला देवी को ...": the name stops before को
+                    if t.group(0) in _HINDI_FUNCTION_WORDS:
+                        toks = toks[:i]
+                        break
+                if not toks:
+                    continue
+                end = m.start(1) + toks[-1].end()
+                yield "NAME", (m.start(1), end)
         for m in RX_GENERIC_ID_LABEL.finditer(text):           # unseen labels: "Hosp No:", "Regn #:"
             if _NOT_PATIENT_ID_LABEL.search(m.group(1)):
                 continue
@@ -490,8 +531,12 @@ def _region_word(w: str) -> bool:
 
 
 _SENTENCE = re.compile(r"[a-zऀ-ॿ]{3,}")
+_SURNAME_FIRST = re.compile(r",[ \t]*([A-Z][A-Za-z]+|[A-Z]+)(?=[ \t]*(?:$|[\n,;|(]|[ \t]{2}))", re.M)
 _SENTENCE_END = re.compile(r"(?<=[a-z]{3})\.(?=[ 	])")
 _THE_BEFORE = re.compile(r"(?:the|of|this|that|our|same)\s+$", re.I)
+_DOC_WORDS = {"policy", "claim", "card", "scheme", "insurance", "form", "receipt", "bill", "invoice", "ticket",
+              "token", "reference", "ref", "file", "case", "folio", "member", "beneficiary", "package", "amount",
+              "status", "remarks", "remark", "comments", "comment", "approved", "rejected", "pending", "total"}
 _CRF_KIND = {"NAME": "NAME", "ADDR": "ADDRESS"}
 _DEVA_CUE = re.compile(r"(?:नाम|मरीज़?|रोगी|पिता|पति|पत्नी|माता|पुत्र|पुत्री|पता|ग्राम|गाँव|गांव|मोहल्ला|मकान|श्री|श्रीमती|"
                        r"S/o|W/o|D/o|C/O)\s*(?:का|की|के)?\s*(?:नाम)?\s*[:\-]?\s*$")
@@ -517,10 +562,12 @@ def _crf_spans(text: str) -> list[Span]:
         if not words:
             continue
         if all(w.lower() in L.CLINICAL_WORDS or w.lower() in CONTEXT_VOCAB or w.lower() in L.REGION_WORDS
-               for w in words):
+               or w.lower() in _DOC_WORDS for w in words):
             continue
         if typ == "NAME" and not any(w[0].isupper() or is_devanagari(w) for w in words):
             continue
+        if _INSTITUTION_AFTER.match(text[s:e]) or _INSTITUTION_AFTER.match(text[s:s + 60]):
+            continue  # "Shri Ram Hospital", "श्री राम अस्पताल": an institution, not a person or home address
         if all(is_devanagari(w) for w in words) and not (
                 _DEVA_CUE.search(text[max(0, s - 40):s]) or any(_deva_gaz(w) for w in words)):
             continue  # Devanagari has no capital letters: demand a label / relation cue or a known name

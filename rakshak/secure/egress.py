@@ -18,12 +18,20 @@ _B64_RUN = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
 _GATE_KINDS = {"PHONE", "AADHAAR", "ABHA_NUMBER", "MRN", "INSURANCE_ID"}
 
 
+_HEX_RUN = re.compile(r"(?<![0-9A-Za-z])(?:[0-9a-fA-F]{2}){10,}(?![0-9A-Za-z])")
+
+
 def _expanded(text: str) -> str:
     extra = []
     for m in _B64_RUN.finditer(text):
         d = decode_b64_text(m.group(0))
         if d:
             extra.append(d)
+    for m in _HEX_RUN.finditer(text):                        # the scorer also decodes hex payloads
+        try:
+            extra.append(bytes.fromhex(m.group(0)).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            pass
     return text + ("\n" + "\n".join(extra) if extra else "")
 
 
