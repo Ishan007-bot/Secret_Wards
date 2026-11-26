@@ -26,6 +26,7 @@ from .formats import csv_tsv, json_doc
 from .link.context import RecordCtx
 from .link.linker import Linker
 from .link.pseudonym import PseudonymIssuer
+from .privacy.ages import band_text
 from .privacy.dates import Shifter, order_evidence
 from .secure.egress import find_leaks
 from .io.decode import decode
@@ -195,9 +196,33 @@ def build_contexts(jobs: list[Job], evs: dict, proc: Processor) -> dict:
         if k:
             for code in e.dx:
                 holders.setdefault(code, set()).add(k)
+    _k_anonymity(by_cluster, ctxs)
     k_dx = int(POLICY["rare_diagnosis_k"])
     proc.rare.set_rare({c for c, h in holders.items() if len(h) < k_dx})
     return ctxs
+
+
+def _k_anonymity(by_cluster: dict, ctxs: dict) -> None:
+    """Patients whose (gender, age band, district) cell holds fewer than k patients get a wider
+    (still truthful) age band in every one of their records."""
+    k = int(POLICY["k_anonymity"])
+    wide = int(POLICY.get("age_band_wide_years", 20))
+    cells: dict[tuple, list] = {}
+    for key, members in by_cluster.items():
+        genders = sorted({g for e in members for g in e.genders})
+        ages = sorted({a for e in members for a in e.ages})
+        dists = sorted({d for e in members for d in e.districts})
+        if not ages:
+            continue
+        cell = (genders[0] if len(genders) == 1 else "?", band_text(str(ages[0])) or "?",
+                dists[0] if len(dists) == 1 else "?")
+        cells.setdefault(cell, []).append(key)
+    for cell, keys in cells.items():
+        if len(keys) < k:
+            for key in keys:
+                for e in by_cluster[key]:
+                    if e.rid in ctxs:
+                        ctxs[e.rid].age_width = wide
 
 
 def egress_gate(job: Job, proc: Processor, gate: Counter) -> None:

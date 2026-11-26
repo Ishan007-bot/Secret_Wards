@@ -122,6 +122,8 @@ class Processor:
                 ev.add_gender(m.group(1) or m.group(2))
         elif role == C.GENDER:
             ev.add_gender(v)
+        elif role == C.DISTRICT:
+            ev.districts.add(v.strip().casefold())
         elif role == C.VILLAGE:
             ev.add_village(v)
         elif role in (C.TEXT, C.KEEP) and isinstance(value, str):
@@ -204,8 +206,9 @@ class Processor:
             self.role_counts["PIN"] += 1
             n = int(POLICY["pin_prefix_digits"])
             return d[:n] + "*" * (6 - n) if len(d) == 6 else "[PIN]"
+        width = rec.age_width if rec is not None else None
         if role == C.AGE:
-            band = band_text(str(value).strip().split()[0]) if str(value).strip() else None
+            band = band_text(str(value).strip().split()[0], width) if str(value).strip() else None
             if band is None:
                 return eng.clean(str(value), rec=rec) if isinstance(value, str) else value
             if isinstance(value, str):
@@ -213,8 +216,8 @@ class Processor:
             return band
         if role == C.AGE_SEX and isinstance(value, str):
             m = re.match(r"\s*(\d{1,3})", value)
-            if m and band_text(m.group(1)):
-                return value[:m.start(1)] + band_text(m.group(1)) + value[m.end(1):]
+            if m and band_text(m.group(1), width):
+                return value[:m.start(1)] + band_text(m.group(1), width) + value[m.end(1):]
             return eng.clean(value, rec=rec)
         if role == C.DOCTOR:
             return eng.clean(value, hard_only=True) if isinstance(value, str) else value

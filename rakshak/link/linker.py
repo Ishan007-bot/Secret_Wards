@@ -34,6 +34,7 @@ class Evidence:
     genders: set = field(default_factory=set)
     villages: set = field(default_factory=set)
     dx: set = field(default_factory=set)         # ICD-10 codes mentioned in the record
+    districts: set = field(default_factory=set)
 
     def primary_name(self):
         """The name this record is mostly about (records also mention relatives and other people)."""

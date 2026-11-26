@@ -364,6 +364,8 @@ class Engine:
         if sp.repl is not None:
             if rec is not None and sp.kind == "AGE":
                 rec.generalized = True
+                if rec.age_width:
+                    return band_text(surface, rec.age_width) or sp.repl
             return sp.repl
         if rec is not None:
             if sp.kind == "DOB" and rec.shifter is not None:

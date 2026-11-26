@@ -4,8 +4,8 @@ from __future__ import annotations
 from ..policy import POLICY
 
 
-def age_band(age: int) -> str:
-    width = int(POLICY["age_band_years"])
+def age_band(age: int, width: int | None = None) -> str:
+    width = int(width or POLICY["age_band_years"])
     top = int(POLICY["age_top_code"])
     if age >= top:
         return f"{top}+"
@@ -14,12 +14,12 @@ def age_band(age: int) -> str:
     return f"{lo}-{hi}"
 
 
-def band_text(value: str) -> str | None:
+def band_text(value: str, width: int | None = None) -> str | None:
     """'48' -> '40-49'; returns None if value is not a plausible age."""
     try:
         age = int(str(value).strip())
     except ValueError:
         return None
     if 0 <= age <= 125:
-        return age_band(age)
+        return age_band(age, width)
     return None

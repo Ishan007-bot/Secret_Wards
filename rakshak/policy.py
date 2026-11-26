@@ -15,6 +15,7 @@ DEFAULTS = {
     "location_level": "district",
     "pin_prefix_digits": 3,
     "k_anonymity": 3,
+    "age_band_wide_years": 20,
     "rare_diagnosis_k": 3,
     "max_json_depth": 200,
 }

@@ -17,6 +17,7 @@ class RecordCtx:
     shifter: Shifter | None = None
     used: bool = False                             # True once the pseudonym was written into the record
     generalized: bool = False                      # True if a quasi-identifier was coarsened in this record
+    age_width: int | None = None                   # wider age band for patients in a small (k-anonymity) cell
 
     def shift_text(self, text: str) -> str:
         if not self.shifter:
