@@ -37,6 +37,7 @@ class Span:
     kind: str
     prio: int
     repl: str | None = None   # explicit replacement (age bands keep their surface form)
+    src: str = ""             # which layer found it (pattern, shape, digits, vault_*, label, age, proximity)
 
 
 # ---------------------------------------------------------------------------------------- L1
@@ -55,6 +56,7 @@ _P = [
 ]
 PATTERNS = [(k, re.compile(p, f)) for k, p, f in _P]
 
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _DIGIT_RUN = re.compile(r"(?<![0-9])\+?\d(?:[\s\-./]?\d){3,17}(?![0-9])")
 
 # ---------------------------------------------------------------------------------------- L3
@@ -205,46 +207,52 @@ class Engine:
 
         for kind, rx in PATTERNS:                                         # L1
             for m in rx.finditer(norm):
-                add(Span(m.start(), m.end(), kind, 3))
+                add(Span(m.start(), m.end(), kind, 3, src="pattern"))
 
         cv = self.vault.compiled()
         if cv.shape_rx:                                                   # L1b
             for m in cv.shape_rx.finditer(norm):
-                add(Span(m.start(), m.end(), "MRN", 3))
+                add(Span(m.start(), m.end(), "MRN", 3, src="shape"))
         if cv.digits:                                                     # L1c
             for m in _DIGIT_RUN.finditer(norm):
                 d = digits_only(m.group(0))
                 kind = cv.digits.get(d) or (cv.digits.get(d[-10:]) if len(d) in (11, 12) else None)
                 if kind:
-                    add(Span(m.start(), m.end(), "PIN" if kind == "PIN" else kind, 3 if kind != "PIN" else 2))
+                    add(Span(m.start(), m.end(), "PIN" if kind == "PIN" else kind, 3 if kind != "PIN" else 2,
+                             src="digits"))
                     continue
                 for g in re.finditer(r"\d+", m.group(0)):
                     gk = cv.digits.get(g.group(0))
                     if gk and gk != "PIN":
-                        add(Span(m.start() + g.start(), m.start() + g.end(), gk, 3))
+                        add(Span(m.start() + g.start(), m.start() + g.end(), gk, 3, src="digits"))
 
         if cv.full_name_rx:                                               # L2
             for m in cv.full_name_rx.finditer(text):
-                add(Span(m.start(), m.end(), cv.full_name_kind.get(_fold_key(m.group(0)), "PATIENT"), 2))
+                add(Span(m.start(), m.end(), cv.full_name_kind.get(_fold_key(m.group(0)), "PATIENT"), 2,
+                         src="vault_full"))
         if cv.text_rx:
             for m in cv.text_rx.finditer(text):
                 k = cv.text_kind.get(_fold_key(m.group(0)), "ADDRESS")
-                add(Span(m.start(), m.end(), k, 2))
+                add(Span(m.start(), m.end(), k, 2, src="vault_text"))
         for rx in (cv.token_rx, cv.deva_rx):
             if rx:
                 for m in rx.finditer(text):
-                    add(Span(m.start(), m.end(), cv.token_kind.get(m.group(0).casefold(), "PATIENT"), 1))
+                    add(Span(m.start(), m.end(), cv.token_kind.get(m.group(0).casefold(), "PATIENT"), 1,
+                             src="vault_tok"))
 
         for kind, value_span in self._label_spans(text):                  # L3
-            add(Span(value_span[0], value_span[1], kind, 2))
+            add(Span(value_span[0], value_span[1], kind, 2, src="label"))
         for rx in [RX_AGE_LABEL] + RX_AGE_FORMS:
             for m in rx.finditer(norm):
                 band = band_text(m.group(1))
                 if band:
-                    add(Span(m.start(1), m.end(1), "AGE", 2, band))
+                    add(Span(m.start(1), m.end(1), "AGE", 2, band, src="age"))
 
         protected = [(m.start(), m.end()) for rx in _PROTECT for m in rx.finditer(text)]   # L5
         spans.extend(_phone_proximity_names(text, spans))                                 # L3b
+        uuids = [(m.start(), m.end()) for m in _UUID.finditer(text)]
+        if uuids:  # resource ids / references are random UUIDs: never personal data, never touched
+            spans = [s for s in spans if not any(us <= s.start and s.end <= ue for us, ue in uuids)]
         return _resolve(spans, protected)
 
     def _label_spans(self, text: str):
@@ -291,22 +299,44 @@ class Engine:
                 yield "DOB", (m.end(), m.end() + dm.end())
 
     # ------------------------------------------------------------------ rewrite
-    def clean(self, text: str, hard_only: bool = False) -> str:
+    def clean(self, text: str, hard_only: bool = False, rec=None) -> str:
+        """Replace every detected span. With a record context (`rec`), the record's own patient name /
+        ID become its pseudonym, DOBs are jittered, and the remaining text has its dates shifted."""
         if not isinstance(text, str) or not text:
             return text
         spans = self.find(text)
         if hard_only:
             spans = [s for s in spans if s.kind in HARD]
+        shift = rec.shift_text if (rec is not None and rec.shifter is not None) else (lambda s: s)
         if not spans:
-            return text
+            return shift(text)
         out, pos = [], 0
         for sp in spans:
-            out.append(text[pos:sp.start])
-            out.append(sp.repl if sp.repl is not None else PLACEHOLDER.get(sp.kind, "[REDACTED]"))
+            out.append(shift(text[pos:sp.start]))
+            out.append(self._replacement(sp, text[sp.start:sp.end], rec))
             self.counts[sp.kind] += 1
             pos = sp.end
-        out.append(text[pos:])
+        out.append(shift(text[pos:]))
         return "".join(out)
+
+    def _replacement(self, sp: Span, surface: str, rec) -> str:
+        if sp.repl is not None:
+            if rec is not None and sp.kind == "AGE":
+                rec.generalized = True
+            return sp.repl
+        if rec is not None:
+            if sp.kind == "DOB" and rec.shifter is not None:
+                jittered = rec.shifter.shift_text(surface, dob=True)
+                if jittered != surface:
+                    rec.generalized = True
+                    return jittered
+            if rec.psn and sp.kind == "MRN" and rec.owns_id(surface):
+                rec.used = True
+                return rec.psn
+            if rec.psn and sp.kind == "PATIENT" and rec.owns_name(surface, sp.src):
+                rec.used = True
+                return rec.psn
+        return PLACEHOLDER.get(sp.kind, "[REDACTED]")
 
 
 _CAP_SEQ = re.compile(r"(?<![A-Za-z])([A-Z][a-z]{1,20}(?:[ \t]+[A-Z][a-z]{1,20}){1,3})(?![A-Za-z])")
@@ -342,7 +372,7 @@ def _phone_proximity_names(text: str, spans: list[Span]) -> list[Span]:
             if len(toks) < 2 or any(t.group(0).lower() in _NOT_NAME_WORDS for t in toks):
                 continue
             base = m.start(1)
-            out.append(Span(base + toks[0].start(), base + toks[-1].end(), "PATIENT", 1))
+            out.append(Span(base + toks[0].start(), base + toks[-1].end(), "PATIENT", 1, src="proximity"))
     return out
 
 

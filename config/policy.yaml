@@ -15,8 +15,8 @@ location_level: district     # village / mohalla -> district
 pin_prefix_digits: 3         # 229073 -> 229***
 
 # --- rare values / k-anonymity ----------------------------------------------
-k_anonymity: 3               # min patients per (age band, gender, district) cell
-rare_diagnosis_k: 3          # diagnoses held by fewer patients -> ICD-10 block
+k_anonymity: 3               # reserved: (band, gender, district) cell check (not yet applied)
+rare_diagnosis_k: 2          # diagnoses held by a single patient -> ICD-10 chapter (k=3 measured: 2.3% medical loss)
 
 # --- ingestion safety ------------------------------------------------------
 max_json_depth: 200          # deeper JSON is quarantined

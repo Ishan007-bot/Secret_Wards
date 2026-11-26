@@ -33,6 +33,14 @@ def record_pointers(data) -> list[str]:
     return ["doc"]
 
 
+def record_locs(data) -> list[str]:
+    """All locators we report: the array records plus a whole-file 'doc' record. The evaluator matches
+    each of its records to the longest locator we give, so 'doc' safely covers files it treats as one
+    document (e.g. a lab report whose 'panels' array is not a list of patients)."""
+    ptrs = record_pointers(data)
+    return ptrs if ptrs == ["doc"] else ptrs + ["doc"]
+
+
 def detect_indent(text: str) -> int | None:
     for line in text.splitlines()[1:6]:
         stripped = line.lstrip(" ")

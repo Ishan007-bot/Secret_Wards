@@ -14,15 +14,19 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from collections import Counter
-
 from .detect.engine import Engine
 from .formats import csv_tsv, json_doc
+from .link.context import RecordCtx
+from .link.linker import Linker
+from .link.pseudonym import PseudonymIssuer
+from .privacy.dates import Shifter, order_evidence
 from .io.decode import decode
 from .io.sniff import Quarantine, json_depth_exceeds, sniff
 from .policy import POLICY
@@ -47,6 +51,8 @@ class Job:
     out_rel: str = ""            # output path relative to sanitized/
     output_text: str = ""
     records: list = field(default_factory=list)
+    month_first: bool = False    # date order of this file (decided from evidence)
+    family: str = ""             # hospital ID family (for date-order voting)
 
 
 def discover(inp: Path) -> list[Path]:
@@ -101,22 +107,129 @@ def safe_name(rel: str, taken: set[str]) -> str:
         length += 1
 
 
-def rewrite(job: Job, proc: Processor) -> None:
+def evidence(job: Job, proc: Processor) -> list:
+    if job.kind in ("csv", "tsv"):
+        return proc.csv_evidence(job.data, job.rel, job.month_first)
+    if job.kind == "json":
+        return proc.json_evidence(job.data, job.rel, job.month_first)
+    return proc.text_evidence(job.text, job.rel, job.month_first)
+
+
+def decide_date_order(jobs: list[Job], evs: dict) -> None:
+    """Day-first vs month-first per file: own evidence, else the vote of files from the same hospital
+    ID family, else the dataset-wide vote, else day-first (the Indian default)."""
+    family_vote: dict[str, list[int]] = {}
+    total = [0, 0]
+    own = {}
+    for job in jobs:
+        if job.status != "pending":
+            continue
+        dmy, mdy = order_evidence(job.text)
+        own[job.rel] = (dmy, mdy)
+        fam = _id_family(evs.get(job.rel, []))
+        job.family = fam
+        v = family_vote.setdefault(fam, [0, 0])
+        v[0] += dmy
+        v[1] += mdy
+        total[0] += dmy
+        total[1] += mdy
+    for job in jobs:
+        if job.status != "pending":
+            continue
+        dmy, mdy = own[job.rel]
+        if dmy != mdy:
+            job.month_first = mdy > dmy
+            continue
+        fv = family_vote.get(job.family, [0, 0])
+        if fv[0] != fv[1]:
+            job.month_first = fv[1] > fv[0]
+        else:
+            job.month_first = total[1] > total[0] * 2  # only if the whole dataset is clearly month-first
+
+
+def _id_family(ev_list: list) -> str:
+    fams = Counter()
+    for ev in ev_list:
+        for i in ev.ids:
+            m = re.match(r"[A-Z]+", i)
+            if m:
+                fams[m.group(0)] += 1
+    return fams.most_common(1)[0][0] if fams else ""
+
+
+def build_contexts(jobs: list[Job], evs: dict, proc: Processor) -> dict:
+    """Link records, issue pseudonyms, and create one RecordCtx per record id."""
+    all_ev = [e for job in jobs for e in evs.get(job.rel, [])]
+    linker = Linker(all_ev)
+    linker.link_strong()
+    linker.link_name_clues()
+    cluster_of = linker.clusters()
+    by_cluster: dict[str, list] = {}
+    for e in all_ev:
+        k = cluster_of.get(e.rid, "")
+        if k:
+            by_cluster.setdefault(k, []).append(e)
+    issuer = PseudonymIssuer()
+    psn = {k: issuer.get(k) for k in sorted(by_cluster)}
+    month_first = {job.rel: job.month_first for job in jobs}
+    ctxs = {}
+    for k, members in by_cluster.items():
+        names = [n for e in members for n in e.names + e.weak_names]
+        ids = set()
+        for e in members:
+            ids |= e.ids
+            for i in e.ids:
+                d = re.sub(r"\D", "", i)
+                if len(d) >= 5:
+                    ids.add(d)
+        for e in members:
+            rel = e.rid.rsplit("|", 1)[0]
+            ctxs[e.rid] = RecordCtx(psn=psn[k], names=names, ids=ids,
+                                    shifter=Shifter(k, month_first.get(rel, False)))
+    proc.linked_clusters = len(by_cluster)
+    # rare diagnoses: codes held by fewer than k distinct patients in this release
+    holders: dict[str, set] = {}
+    for e in all_ev:
+        k = cluster_of.get(e.rid, "")
+        if k:
+            for code in e.dx:
+                holders.setdefault(code, set()).add(k)
+    k_dx = int(POLICY["rare_diagnosis_k"])
+    proc.rare.set_rare({c for c, h in holders.items() if len(h) < k_dx})
+    return ctxs
+
+
+def _record(out_file: str, loc: str, rec: RecordCtx) -> dict:
+    return {"file": out_file, "loc": loc, "patient": rec.psn if rec.used else None,
+            "status": "generalized" if rec.generalized else "sanitized"}
+
+
+def rewrite(job: Job, proc: Processor, ctxs: dict) -> None:
     out_file = f"sanitized/{job.out_rel}"
+
+    def rec_for(loc: str) -> RecordCtx:
+        return ctxs.get(f"{job.rel}|{loc}") or RecordCtx()
+
     if job.kind in ("csv", "tsv"):
         delim = "\t" if job.kind == "tsv" else ","
         rows = job.data
-        for i in range(1, len(rows)):
-            job.records.append({"file": out_file, "loc": f"row:{i - 1}", "patient": None})
-        job.output_text = csv_tsv.write(proc.csv_rewrite(rows), delim, csv_tsv.line_terminator(job.text)) if rows else ""
+        recs = [rec_for(f"row:{i}") for i in range(max(0, len(rows) - 1))]
+        job.output_text = (csv_tsv.write(proc.csv_rewrite(rows, recs), delim, csv_tsv.line_terminator(job.text))
+                           if rows else "")
+        for i, rec in enumerate(recs):
+            job.records.append(_record(out_file, f"row:{i}", rec))
     elif job.kind == "json":
-        for ptr in json_doc.record_pointers(job.data):
-            job.records.append({"file": out_file, "loc": ptr, "patient": None})
-        job.output_text = json_doc.dump(proc.json_rewrite(job.data), json_doc.detect_indent(job.text),
+        pointers = json_doc.record_locs(job.data)
+        recmap = {p: rec_for(p) for p in pointers}
+        job.output_text = json_doc.dump(proc.json_rewrite(job.data, recmap), json_doc.detect_indent(job.text),
                                         job.text.endswith("\n"))
+        for p in pointers:
+            rec = recmap[p]
+            job.records.append(_record(out_file, p, rec))
     else:
-        job.records.append({"file": out_file, "loc": "doc", "patient": None})
-        job.output_text = proc.text_rewrite(job.text)
+        rec = rec_for("doc")
+        job.output_text = proc.text_rewrite(job.text, rec)
+        job.records.append(_record(out_file, "doc", rec))
     job.status = "sanitized"
 
 
@@ -142,11 +255,21 @@ def run(inp: Path, out: Path) -> dict:
             job.out_rel = safe_name(job.rel, taken)
             taken.add(job.out_rel)
 
+    evs = {}                                                                         # P1b evidence
+    for job in jobs:
+        if job.status == "pending":
+            try:
+                evs[job.rel] = evidence(job, proc)
+            except Exception as exc:  # noqa: BLE001
+                job.status, job.reason = "quarantined", "evidence_error_" + log.error_kind(exc).lower()
+    decide_date_order(jobs, evs)
+    ctxs = build_contexts(jobs, evs, proc)                                           # P2 link
+
     for job in jobs:                                                                 # P4 rewrite
         if job.status != "pending":
             continue
         try:
-            rewrite(job, proc)
+            rewrite(job, proc, ctxs)
         except Exception as exc:  # noqa: BLE001 - fail safe: never export a half-cleaned file
             job.status, job.reason, job.records = "quarantined", "process_error_" + log.error_kind(exc).lower(), []
 
@@ -168,7 +291,7 @@ def run(inp: Path, out: Path) -> dict:
 
     entities = Counter(engine.counts) + Counter(proc.role_counts)
     entities.pop("AGE", None)  # age bands are generalisations, not identifier detections
-    return write_report(out, files, records, entities, generalized=proc.generalized_records, suppressed=0,
+    return write_report(out, files, records, entities, generalized=sum(1 for r in records if r.get("status") == "generalized"), suppressed=0,
                         seconds=time.monotonic() - t0)
 
 

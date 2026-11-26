@@ -27,6 +27,7 @@ class Vault:
         self.digits: dict[str, str] = {}          # digit core -> kind (PHONE, AADHAAR, ABHA_NUMBER, MRN, PIN)
         self.ids: dict[str, str] = {}             # exact ID string (upper) -> kind
         self.id_shapes: set[str] = set()          # regex sources learned from ID values
+        self.core_to_id: dict[str, str] = {}      # digit core -> normalised full ID ("" if ambiguous)
         self._compiled = None
 
     # ------------------------------------------------------------------ harvesting
@@ -98,14 +99,16 @@ class Vault:
         if fold(v) in _JUNK or not re.search(r"\d", v) or len(v) > 40:
             return
         self.ids[v.upper()] = kind
+        full = re.sub(r"[^A-Z0-9]", "", ascii_digits(v).upper())
         # digit cores: the full digit string and every long digit group (the scorer matches digit cores)
         groups = re.findall(r"\d+", ascii_digits(v))
         whole = "".join(groups)
-        if len(whole) >= 5:
-            self.digits.setdefault(whole, kind)
-        for g in groups:
-            if len(g) >= 5 or (len(g) >= 4 and g.startswith("0")):
-                self.digits.setdefault(g, kind)
+        cores = [whole] if len(whole) >= 5 else []
+        cores += [g for g in groups if len(g) >= 5 or (len(g) >= 4 and g.startswith("0"))]
+        for c in cores:
+            self.digits.setdefault(c, kind)
+            prev = self.core_to_id.get(c, full)
+            self.core_to_id[c] = full if prev == full else ""   # "" = ambiguous core, never used to link
         shape = id_shape(v)
         if shape:
             self.id_shapes.add(shape)
