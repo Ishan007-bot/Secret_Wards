@@ -149,7 +149,7 @@ def id_shape(value: str) -> str | None:
 
 
 _UUID_ID = re.compile(r"(?:urn:uuid:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-# text side: an apostrophe joins a name only before a capital (D'Souza, O'Brien); "Asha's" stays Asha + s
+# text side: an apostrophe joins a name only before a capital (D'Souza, O'Brien); "Tejal's" stays Tejal + s
 _WORD = re.compile(r"[A-Za-z0-9]+(?:['’][A-Z][A-Za-z]*)*|[ऀ-ॣ०-ॿ]+")
 # stored (lower-case) side: any apostrophe joins
 _WORD_KEY = re.compile(r"[A-Za-z0-9]+(?:['’][A-Za-z]+)*|[ऀ-ॣ०-ॿ]+")
@@ -158,7 +158,7 @@ _WORD_KEY = re.compile(r"[A-Za-z0-9]+(?:['’][A-Za-z]+)*|[ऀ-ॣ०-ॿ]+")
 def _key(w: str) -> str:
     return w.replace("'", "").replace("’", "").casefold()
 def _name_case(w: str) -> bool:
-    """Title or UPPER case, per apostrophe part: Ramesh, RAMESH, D'Souza, O'Brien."""
+    """Title or UPPER case, per apostrophe part: Tejal, TEJAL, D'Souza, O'Brien."""
     parts = re.split(r"['’]", w)
     return all(p and p[0].isupper() and (p[1:].islower() or p.isupper() or not p[1:]) for p in parts) or w.isupper()
 

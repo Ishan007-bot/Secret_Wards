@@ -63,8 +63,34 @@ def main() -> int:
     from rakshak.detect import lexicon as L
     generic = {h.lower().rstrip(".") for h in L.HONORIFICS_AFTER + L.HONORIFICS_BEFORE} | set(L.GENERIC_NAME_TOKENS)
     tokens = {unicodedata.normalize("NFC", t) for t in tokens} - generic   # kinship words are not names
+    # runtime code (rakshak/, config/) must not contain practice hospital / lab names or practice name words,
+    # not even as stop-words: behaviour must come from general rules, never from memorised practice values
+    kit = Path(a.kit)
+    inst = set()
+    for f in truth["files"].values():
+        for u in f["units"].values():
+            for pv in u.get("preserve") or []:
+                if pv.get("kind") == "hospital":
+                    inst |= {w.lower() for w in re.findall(r"[A-Za-z]{4,}", pv["text"])}
+    try:
+        for line in (kit / "dev/attacker/known_facts.jsonl").read_text(encoding="utf-8").splitlines():
+            inst |= {w.lower() for w in re.findall(r"[A-Za-z]{4,}", json.loads(line).get("hospital", ""))}
+    except (OSError, ValueError):
+        pass
+    inst -= {"hospital", "multispeciality", "charitable", "seva", "sadan", "district", "community", "health",
+             "centre", "center", "clinic", "pathology", "diagnostics", "nursing", "home", "medical", "city"}
+    allowed_runtime = {"mohammad", "mohammed", "shaikh", "asha", "मोहम्मद"}   # generic variant table / job title
+    runtime_banned = (inst | {t for t in tokens if len(t) >= 4}) - allowed_runtime
     problems = []
     files = tracked_files()
+    for p in files:
+        rel = p.relative_to(ROOT).as_posix()
+        if (rel.startswith("rakshak/") and rel.endswith(".py")) or rel.startswith("config/"):
+            words = set(re.findall(r"[a-zऀ-ॿ]{4,}", unicodedata.normalize("NFC", p.read_text(
+                encoding="utf-8").lower())))
+            hit = sorted(words & runtime_banned)
+            if hit:
+                problems.append(f"{rel}: practice name / institution words in runtime code ({len(hit)})")
     for p in files:
         rel = p.relative_to(ROOT).as_posix()
         if rel.startswith(("dev/", "training/data/")) or "/dev/input/" in rel:

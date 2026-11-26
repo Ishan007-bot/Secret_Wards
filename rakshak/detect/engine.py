@@ -349,7 +349,7 @@ class Engine:
                     tail = _SURNAME_FIRST.match(text, m.end() + e)
                     if tail and (val.isupper() or len(val.split()) == 1) and tail.group(1).lower() not in \
                             L.CLINICAL_WORDS | L.REGION_WORDS:
-                        e = tail.end() - m.end()                  # "KUMAR, RAMESH" / "Sharma, Anita"
+                        e = tail.end() - m.end()                  # "KHANNA, TEJAS" / "Rathi, Nivedita"
                     yield kind, (m.end() + s, m.end() + e)
         for m in RX_RELATION.finditer(text):
             marker = m.group(0)[:3].lower()
@@ -373,7 +373,7 @@ class Engine:
                 yield "MRN", (m.end(), m.end() + len(v.group(0)))
         for m in RX_LANDLINE.finditer(text):
             yield "PHONE", (m.start(1), m.end(1))
-        for rx in (RX_HONORIFIC_NAME, RX_HONORIFIC_DEVA):                # "Smt. Kamla Devi", "श्रीमती कमला"
+        for rx in (RX_HONORIFIC_NAME, RX_HONORIFIC_DEVA):                # "Smt. Nivedita Rathi", "श्रीमती निवेदिता"
             for m in rx.finditer(text):
                 if _INSTITUTION_AFTER.match(text[m.start(1):m.start(1) + 60]):
                     continue                                          # "Shri Ram Hospital" is a place
@@ -382,7 +382,7 @@ class Engine:
                     continue
                 end = m.end(1)
                 toks = list(re.finditer(r"\S+", m.group(1)))
-                for i, t in enumerate(toks):                 # "कमला देवी को ...": the name stops before को
+                for i, t in enumerate(toks):                 # "निवेदिता राठी को ...": the name stops before को
                     if t.group(0) in _HINDI_FUNCTION_WORDS:
                         toks = toks[:i]
                         break
@@ -481,12 +481,16 @@ class Engine:
 
 
 _CAP_SEQ = re.compile(r"(?<![A-Za-z])([A-Z][a-z]{1,20}(?:[ \t]+[A-Z][a-z]{1,20}){1,3})(?![A-Za-z])")
+_INSTITUTION_WORDS = {"hospital", "clinic", "labs", "lab", "pathology", "diagnostics", "diagnostic", "nursing",
+                      "charitable", "multispeciality", "superspeciality", "sadan", "trust", "medical", "centre",
+                      "center", "dispensary", "polyclinic", "pharmacy", "chemist", "institute", "college"}
 _NOT_NAME_WORDS = L.CLINICAL_WORDS | L.REGION_WORDS | L.COMPLAINT_WORDS | {
     "mob", "mobile", "phone", "ph", "contact", "call", "callback", "tel", "reg", "no", "number", "address", "the",
     "village", "tehsil", "district", "distt", "pin", "code", "house", "near", "opp", "behind", "road", "street",
     "koi", "problem", "please", "kindly", "thanks", "thank", "regards", "dear", "sir", "madam", "hello", "hi",
-    "multispeciality", "charitable", "seva", "sadan", "jeevan", "jyoti", "sanjeevani", "arogya", "city",
-    "lifeline", "pathkind", "trip", "from", "to", "via", "en", "route", "oxygen", "given", "billing", "query",
+    "multispeciality", "superspeciality", "charitable", "seva", "sadan", "city", "hospital", "clinic", "labs",
+    "lab", "pathology", "diagnostics", "diagnostic", "nursing", "home", "medical", "centre", "center", "trust",
+    "trip", "from", "to", "via", "en", "route", "oxygen", "given", "billing", "query",
     "came", "visited", "called", "informed", "spoke", "attended", "brought", "relative", "guardian", "husband",
     "wife", "son", "daughter", "father", "mother", "brother", "sister", "friend", "neighbour", "neighbor"}
 
@@ -512,6 +516,8 @@ def _phone_proximity_names(text: str, spans: list[Span]) -> list[Span]:
         for m in _CAP_SEQ.finditer(text, ls, le):
             # trim known non-name words from both edges ("Visitor Ngurthansanga Hmar" -> the name)
             toks = list(re.finditer(r"[A-Za-z]+", m.group(1)))
+            if any(t.group(0).lower() in _INSTITUTION_WORDS for t in toks):
+                continue          # "<Anything> Charitable Hospital", "<X> Pathology": an institution, not a person
             while toks and toks[0].group(0).lower() in _NOT_NAME_WORDS:
                 toks.pop(0)
             while toks and toks[-1].group(0).lower() in _NOT_NAME_WORDS:

@@ -281,7 +281,7 @@ def _clue_keys(e: Evidence):
             for a in e.ages:
                 for aa in (a - 1, a, a + 1):
                     yield ("n_vil_age", n, v, aa)
-    # first-name level keys (fragmented notes: "Meera, W/o Rajan"): every name token x relative token
+    # first-name level keys (fragmented notes: "Nivedita, W/o Tejas"): every name token x relative token
     for n in names + weak:
         for tok in n:
             for rel in rels:

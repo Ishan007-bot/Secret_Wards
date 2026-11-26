@@ -2,7 +2,7 @@
 
 deva_to_latin('मोहम्मद आरिफ')  -> 'mohammad aarif'   (Hindi schwa deletion applied)
 phonetic('Mohammad') == phonetic('मोहम्मद') == phonetic('Mohd')
-phonetic('Fatima') ~ phonetic('Fatma'), phonetic('Reena') == phonetic('Rina')
+phonetic('Deepika') == phonetic('Dipika'), phonetic('Meenakshi') ~ phonetic('Minakshi')
 """
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ def phonetic(token: str) -> str:
     t = _VARIANTS.get(t, t)
     if not t:
         return ""
-    t = re.sub(r"ey$", "e", t)                     # Pandey / पांडे
+    t = re.sub(r"ey$", "e", t)                     # Dubey / दुबे-style final -ey
     t = t.replace("ou", "au")                      # Gourav / Gaurav first, then one diphthong form:
     t = re.sub(r"(?:ow|aw|au)(?=[^aeiouy]|$)", "o", t)   # Bhowmick / Bhaumik / भौमिक, Gowda / गौड़ा
     for a, b in (("aa", "a"), ("ee", "i"), ("ii", "i"), ("oo", "u"), ("uu", "u"), ("ou", "au"), ("qui", "ki"),
@@ -109,7 +109,7 @@ def phonetic(token: str) -> str:
         t = t.replace(a, b)
     t = re.sub(r"(.)\1+", r"\1", t)              # collapse doubled letters
     if len(t) > 3:
-        t = re.sub(r"[ah]$", "", t)               # trailing schwa / h (Reena/Rina, Shah/Sha)
+        t = re.sub(r"[ah]$", "", t)               # trailing schwa / h (Dipika/Deepika, Shah/Sha)
     return t
 
 
@@ -185,13 +185,13 @@ def token_match(a: str, b: str) -> bool:
         return True
     if len(a) == 1 or len(b) == 1:           # initials: "A." vs "Arif"
         return a[0] == b[0]
-    # same consonant skeleton AND close spelling: Fatima/Fatma yes, Sunita/Sunil and Rina/Rana no
+    # same consonant skeleton AND close spelling: Deepika/Dipika yes, Nivedita/Nivedan and Tina/Tana no
     sa = a[:1] + re.sub(r"[aeiou]", "", a[1:])
     sb = b[:1] + re.sub(r"[aeiou]", "", b[1:])
     if sa == sb and jaro_winkler(a, b) >= 0.85:
         return True
     # a leading vowel is spelled freely across scripts: Eshan / Ishan / ईशान, Ekta / Ikta
-    if a[0] in "ei" and b[0] in "ei" and a[0] != b[0]:     # only e <-> i (never Asha/Usha, Aman/Iman)
+    if a[0] in "ei" and b[0] in "ei" and a[0] != b[0]:     # only e <-> i (never Ama/Uma, Aman/Iman)
         na, nb = re.sub(r"^[ei]+", "i", a), re.sub(r"^[ei]+", "i", b)
         return re.sub(r"[aeiou]", "", na) == re.sub(r"[aeiou]", "", nb) and jaro_winkler(na, nb) >= 0.85
     return False
