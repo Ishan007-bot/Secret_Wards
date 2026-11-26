@@ -141,6 +141,10 @@ def id_shape(value: str) -> str | None:
     return r"[-/ _.:]?".join(out)
 
 
+_WORD = re.compile(r"[A-Za-z0-9]+|[ऀ-ॣ०-ॿ]+")
+_GAP = re.compile(r"[\s_.,\-]*")
+
+
 def _alternation(words, deva: bool = False) -> str:
     words = sorted(set(words), key=lambda w: (-len(w), w))
     return "|".join(re.escape(w) for w in words)
@@ -157,29 +161,40 @@ class _Compiled:
                 pats.append(sep.join(re.escape(t) for t in toks))
             return pats
 
-        b = r"A-Za-z0-9" + DEVA  # word characters; '_' is deliberately a separator (file paths)
-        name_pats = multi(v.full_names)
-        self.full_name_rx = (re.compile(r"(?<![%s])(?:%s)(?![%s])" % (b, "|".join(name_pats), b), re.I)
-                             if name_pats else None)
-        self.full_name_kind = v.full_names
 
-        text_pats = multi(v.texts)
-        self.text_rx = (re.compile(r"(?<![%s])(?:%s)(?![%s])" % (b, "|".join(text_pats), b), re.I)
-                        if text_pats else None)
-        self.text_kind = v.texts
-
-        latin = [t for t in v.name_tokens if not is_devanagari(t)]
-        deva = [t for t in v.name_tokens if is_devanagari(t)]
-        # single Latin tokens: Title Case or UPPER only (lower-case words are usually not names)
-        variants = []
-        for t in latin:
-            variants += [t.capitalize(), t.upper()]
-        self.token_rx = (re.compile(r"(?<![A-Za-z])(?:%s)(?![A-Za-z])" % _alternation(variants)) if variants else None)
-        self.deva_rx = (re.compile(r"(?<![%s])(?:%s)(?![%s])" % (DEVA, _alternation(deva), DEVA)) if deva else None)
-        self.token_kind = v.name_tokens
+        # token index (linear time, independent of vault size): first word -> phrases starting with it
+        self.phrases: dict[str, list] = {}
+        for store, src in ((v.full_names, "vault_full"), (v.texts, "vault_text")):
+            for p, kind in store.items():
+                toks = tuple(t.casefold() for t in _WORD.findall(p))
+                if toks:
+                    self.phrases.setdefault(toks[0], []).append((toks, kind, src))
+        for lst in self.phrases.values():
+            lst.sort(key=lambda x: -len(x[0]))
+        self.single = dict(v.name_tokens)
 
         shapes = sorted(v.id_shapes, key=lambda s: (-len(s), s))
         self.shape_rx = (re.compile(r"(?<![A-Za-z0-9])(?:%s)(?![A-Za-z0-9])" % "|".join(shapes), re.I)
                          if shapes else None)
         self.digits = v.digits
         self.ids = v.ids
+
+    def matches(self, text: str) -> list[tuple[int, int, str, str]]:
+        """All vault phrases (full names, address texts) and single name tokens in `text`:
+        (start, end, kind, src). Words are compared case-insensitively; between the words of a phrase
+        only separators (space, _, ., comma, -) may appear. Single Latin tokens must be Title/UPPER case."""
+        words = [(m.start(), m.end(), m.group(0)) for m in _WORD.finditer(text)]
+        low = [w[2].casefold() for w in words]
+        out = []
+        n = len(words)
+        for i, (s, e, w) in enumerate(words):
+            for toks, kind, src in self.phrases.get(low[i], ()):
+                k = len(toks)
+                if i + k <= n and tuple(low[i:i + k]) == toks and all(
+                        _GAP.fullmatch(text, words[j][1], words[j + 1][0]) for j in range(i, i + k - 1)):
+                    out.append((s, words[i + k - 1][1], kind, src))
+                    break
+            kind = self.single.get(low[i])
+            if kind and (is_devanagari(w) or (w[0].isupper() and (w[1:].islower() or w.isupper()))):
+                out.append((s, e, kind, "vault_tok"))
+        return out

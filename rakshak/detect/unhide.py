@@ -19,6 +19,8 @@ _HOMOGLYPH = str.maketrans({
     "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T",
     "Υ": "Y", "Χ": "X",
 })
+_FULLWIDTH = re.compile("[＀-￯]")
+_COMBINING = re.compile("[̀-ͯ]")
 _MIXED = re.compile(r"[A-Za-z][Ͱ-ϿЀ-ӿ]|[Ͱ-ϿЀ-ӿ][A-Za-z]")
 
 
@@ -37,7 +39,7 @@ def unhide(text: str) -> str:
         t = _ZERO_WIDTH.sub("", t)
     if _MIXED.search(t):
         t = t.translate(_HOMOGLYPH)
-    if any(ord(c) > 0xFF00 for c in t):  # full-width forms -> ASCII
+    if _FULLWIDTH.search(t):  # full-width forms -> ASCII
         t = unicodedata.normalize("NFKC", t)
     return t
 
@@ -46,6 +48,6 @@ def scan_form(text: str) -> str:
     """Comparison form used by the egress gate (mirrors the scorer's normalisation)."""
     t = unhide(text)
     t = unicodedata.normalize("NFKC", t)
-    t = "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c)
-                or "ऀ" <= c <= "ॿ")
+    if not t.isascii():
+        t = _COMBINING.sub("", unicodedata.normalize("NFKD", t))   # Latin diacritics only
     return t.translate(str.maketrans("०१२३४५६७८९", "0123456789")).casefold()

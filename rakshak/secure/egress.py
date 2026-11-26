@@ -42,10 +42,9 @@ def find_leaks(text: str, vault) -> int:
             hits += 1
     if cv.shape_rx and cv.shape_rx.search(form):
         hits += len(cv.shape_rx.findall(form))
-    if cv.full_name_rx:
-        plain = unhide(raw)
+    plain = unhide(raw)
+    names = [(s, e) for s, e, _k, src in cv.matches(plain) if src == "vault_full"]
+    if names:
         protected = [(p.start(), p.end()) for rx in _PROTECT for p in rx.finditer(plain)]
-        for m in cv.full_name_rx.finditer(plain):
-            if not any(ps <= m.start() and m.end() <= pe for ps, pe in protected):
-                hits += 1
+        hits += sum(1 for s, e in names if not any(ps <= s and e <= pe for ps, pe in protected))
     return hits

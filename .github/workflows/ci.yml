@@ -31,3 +31,10 @@ jobs:
         run: "! grep -r -l 'ci-secret-a' out_a out_b"
       - name: Practice self-check
         run: python kit/check_dev.py --output out_a
+      - name: Run with networking disabled (like the evaluator sandbox)
+        run: |
+          PY=$(which python)
+          sudo unshare -n env RAKSHA_SECRET=ci-secret-a "$PY" main.py --input kit/dev/input --output out_offline
+          diff -r out_a/sanitized out_offline/sanitized && diff out_a/records.jsonl out_offline/records.jsonl
+      - name: Organiser pre-submit check (3 runs, determinism, secret, input untouched)
+        run: python kit/check_submission.py --repo . --run | tee submit.txt && grep -q "READY TO SUBMIT" submit.txt

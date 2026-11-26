@@ -284,7 +284,8 @@ class Processor:
             vals = [r[j].strip() for r in rows[1:] if j < len(r) and r[j].strip()]
             if len(vals) < 2 or any(len(v.split()) > 4 or re.search(r"\d", v) for v in vals):
                 continue
-            hits = sum(1 for v in vals if cv.full_name_rx and cv.full_name_rx.fullmatch(v))
+            hits = sum(1 for v in vals if any(s == 0 and e == len(v) and src == "vault_full"
+                                              for s, e, _k, src in cv.matches(v)))
             if hits >= 0.6 * len(vals):
                 out[j] = C.NAME
         return out

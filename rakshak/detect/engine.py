@@ -254,19 +254,8 @@ class Engine:
                     if gk and gk != "PIN":
                         add(Span(m.start() + g.start(), m.start() + g.end(), gk, 3, src="digits"))
 
-        if cv.full_name_rx:                                               # L2
-            for m in cv.full_name_rx.finditer(text):
-                add(Span(m.start(), m.end(), cv.full_name_kind.get(_fold_key(m.group(0)), "PATIENT"), 2,
-                         src="vault_full"))
-        if cv.text_rx:
-            for m in cv.text_rx.finditer(text):
-                k = cv.text_kind.get(_fold_key(m.group(0)), "ADDRESS")
-                add(Span(m.start(), m.end(), k, 2, src="vault_text"))
-        for rx in (cv.token_rx, cv.deva_rx):
-            if rx:
-                for m in rx.finditer(text):
-                    add(Span(m.start(), m.end(), cv.token_kind.get(m.group(0).casefold(), "PATIENT"), 1,
-                             src="vault_tok"))
+        for s, e, kind, src in cv.matches(text):                         # L2 (token index)
+            add(Span(s, e, kind, 1 if src == "vault_tok" else 2, src=src))
 
         for kind, value_span in self._label_spans(text):                  # L3
             add(Span(value_span[0], value_span[1], kind, 2, src="label"))
