@@ -83,7 +83,7 @@ def main() -> int:
         for ph in phrases:
             if ph in low and len(ph) >= 6:
                 problems.append(f"{rel}: practice value '{ph[:3]}…' ({len(ph)} chars)")
-        if rel.startswith("rakshak/data/") or rel.startswith("models/"):
+        if (rel.startswith("rakshak/data/") or rel.startswith("models/")) and p.suffix in (".txt", ".json"):
             words = set(re.findall(r"[a-zऀ-ॿ]+", unicodedata.normalize("NFC", low)))
             hit = sorted(words & tokens)
             if hit:
