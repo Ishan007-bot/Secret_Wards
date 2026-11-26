@@ -48,12 +48,20 @@ GENERIC = {"devi", "kumar", "kumari", "singh", "kaur", "bano", "begum", "lal", "
            "mohammad", "khatoon", "देवी", "कुमार", "सिंह", "कौर", "बानो"}
 
 
+def _ymd(text: str) -> str:
+    """dd/mm/yyyy -> yyyy/mm/dd (a date format the practice data never uses)."""
+    return re.sub(r"(?<![\d/])(\d{2})/(\d{2})/(\d{4})(?![\d/])", r"\3/\2/\1", text)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--kit", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--hard", action="store_true",
+                    help="also: ';' delimiters in some CSVs and yyyy/mm/dd dates in d/m/y files")
     a = ap.parse_args()
+    hard_delim: dict = {}
     rnd = random.Random(a.seed)
     kit, out = Path(a.kit), Path(a.out)
     truth = json.loads((kit / "dev/truth/truth.json").read_text(encoding="utf-8"))
@@ -148,7 +156,18 @@ def main() -> int:
                     first = delim.join(HEADERS.get(h.strip().lstrip("﻿"), h) if h.strip() else h
                                        for h in first.split(delim))
                     text = first + _ + rest
-                data = mutate(text).encode(enc if enc != "utf-8-sig" else "utf-8-sig")
+                text = mutate(text)
+                if a.hard and f.get("date_hint") == "dmy":
+                    text = _ymd(text)                      # 12/04/1977 -> 1977/04/12
+                if a.hard and f["format"] == "csv" and int(hashlib.sha256(rel.encode()).hexdigest(), 16) % 2:
+                    import csv as _csv
+                    import io as _io
+                    rows = list(_csv.reader(_io.StringIO(text, newline="")))
+                    buf = _io.StringIO()
+                    _csv.writer(buf, delimiter=";", lineterminator="\r\n" if "\r\n" in text else "\n").writerows(rows)
+                    text = buf.getvalue()
+                    hard_delim[rel] = ";"
+                data = text.encode(enc if enc != "utf-8-sig" else "utf-8-sig")
             except (UnicodeError, LookupError):
                 data = raw
         else:
@@ -156,11 +175,14 @@ def main() -> int:
         dst.write_bytes(data)
         nf = json.loads(json.dumps(f))
         nf["sha256"] = hashlib.sha256(data).hexdigest()
+        if rel in hard_delim:
+            nf["delimiter"] = hard_delim[rel]
+        conv = _ymd if a.hard and f.get("date_hint") == "dmy" else (lambda t: t)
         for u in nf["units"].values():
             for e in u["entities"]:
-                e["surface"] = mutate(e["surface"])
+                e["surface"] = conv(mutate(e["surface"]))
             for p in u.get("preserve") or []:
-                p["text"] = mutate(p["text"]) if p.get("kind") not in ("doctor",) else p["text"]
+                p["text"] = conv(mutate(p["text"])) if p.get("kind") not in ("doctor",) else p["text"]
         files_out[new_rel] = nf
     nt = dict(truth)
     nt["files"] = files_out

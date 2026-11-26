@@ -17,8 +17,9 @@ RAKSHA_SECRET=regress-c $PY main.py --input "$KIT/dev/input" --output "$WORK/p_c
 $PY "$KIT/validate_output.py" --input "$KIT/dev/input" --output "$WORK/p_a" | tail -1
 $PY tools/selfscore.py --kit "$KIT" --output "$WORK/p_a" --rerun "$WORK/p_b" --other "$WORK/p_c" | sed -n 2p
 $PY "$KIT/check_dev.py" --output "$WORK/p_a" | grep -E "PERSONAL|CANAR|MEDICAL|LINKING"
-for seed in 7 11; do
-  [ -d "$WORK/chaos_$seed" ] || $PY tools/gen_chaos.py --kit "$KIT" --out "$WORK/chaos_$seed" --seed $seed >/dev/null
+for seed in 7 11 23h; do
+  hard=""; [ "${seed%h}" != "$seed" ] && hard="--hard"
+  [ -d "$WORK/chaos_$seed" ] || $PY tools/gen_chaos.py --kit "$KIT" --out "$WORK/chaos_$seed" --seed ${seed%h} $hard >/dev/null
   rm -rf "$WORK/chaos_${seed}_out"
   $PY main.py --input "$WORK/chaos_$seed/input" --output "$WORK/chaos_${seed}_out" >/dev/null
   $PY tools/selfscore.py --kit "$KIT" --output "$WORK/chaos_${seed}_out" --input "$WORK/chaos_$seed/input" \

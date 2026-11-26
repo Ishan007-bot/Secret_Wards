@@ -100,6 +100,8 @@ def phonetic(token: str) -> str:
     if not t:
         return ""
     t = re.sub(r"ey$", "e", t)                     # Pandey / पांडे
+    t = t.replace("ou", "au")                      # Gourav / Gaurav first, then one diphthong form:
+    t = re.sub(r"(?:ow|aw|au)(?=[^aeiouy]|$)", "o", t)   # Bhowmick / Bhaumik / भौमिक, Gowda / गौड़ा
     for a, b in (("aa", "a"), ("ee", "i"), ("ii", "i"), ("oo", "u"), ("uu", "u"), ("ou", "au"), ("qui", "ki"),
                  ("ph", "f"), ("w", "v"), ("z", "j"), ("q", "k"), ("ck", "k"), ("sh", "s"), ("kh", "k"),
                  ("gh", "g"), ("chh", "c"), ("ch", "c"), ("jh", "j"), ("th", "t"), ("dh", "d"), ("bh", "b"),
@@ -114,7 +116,10 @@ def phonetic(token: str) -> str:
 def skeleton(token: str) -> str:
     """Consonant skeleton for blocking: keeps the first letter, drops vowels."""
     p = phonetic(token)
-    return p[:1] + re.sub(r"[aeiou]", "", p[1:]) if p else ""
+    if not p:
+        return ""
+    head = "i" if p[0] in "ei" else p[:1]           # Eshan / Ishan / ईशान block together
+    return head + re.sub(r"[aeiou]", "", p[1:])
 
 
 _DROP = {h.lower() for h in L.HONORIFICS_AFTER + L.HONORIFICS_BEFORE} | {"", "dr"}
@@ -183,7 +188,13 @@ def token_match(a: str, b: str) -> bool:
     # same consonant skeleton AND close spelling: Fatima/Fatma yes, Sunita/Sunil and Rina/Rana no
     sa = a[:1] + re.sub(r"[aeiou]", "", a[1:])
     sb = b[:1] + re.sub(r"[aeiou]", "", b[1:])
-    return sa == sb and jaro_winkler(a, b) >= 0.85
+    if sa == sb and jaro_winkler(a, b) >= 0.85:
+        return True
+    # a leading vowel is spelled freely across scripts: Eshan / Ishan / ईशान, Ekta / Ikta
+    if a[0] in "ei" and b[0] in "ei" and a[0] != b[0]:     # only e <-> i (never Asha/Usha, Aman/Iman)
+        na, nb = re.sub(r"^[ei]+", "i", a), re.sub(r"^[ei]+", "i", b)
+        return re.sub(r"[aeiou]", "", na) == re.sub(r"[aeiou]", "", nb) and jaro_winkler(na, nb) >= 0.85
+    return False
 
 
 def names_compatible(a: tuple, b: tuple) -> bool:
