@@ -37,12 +37,16 @@ class Evidence:
     districts: set = field(default_factory=set)
 
     def primary_name(self):
-        """The name this record is mostly about (records also mention relatives and other people)."""
+        """The name this record is mostly about (records also mention relatives and other people).
+        Distinct names only, weighted by how often each occurs: O(distinct^2), never O(mentions^2)."""
         if not self.names:
             return None
-        best, best_score = None, None
+        counts: dict = {}
         for n in self.names:
-            support = sum(1 for m in self.names if names_compatible(n, m))
+            counts[n] = counts.get(n, 0) + 1
+        best, best_score = None, None
+        for n in counts:
+            support = sum(c for m, c in counts.items() if names_compatible(n, m))
             score = (support, len(n), n)
             if best_score is None or score > best_score:
                 best, best_score = n, score
@@ -70,11 +74,16 @@ class Evidence:
     def add_name(self, value: str, strong: bool = True) -> None:
         t = name_tokens(value)
         if t and any(not generic(x) for x in t):
-            (self.names if strong else self.weak_names).append(t)
+            if strong:
+                # mention counts matter (primary name) but are bounded: a huge log cannot blow up linking
+                if len(self.names) < 2000 or t not in self.names[-2000:]:
+                    self.names.append(t)
+            elif t not in self.weak_names:
+                self.weak_names.append(t)
 
     def add_relative(self, value: str) -> None:
         t = name_tokens(value)
-        if t and any(not generic(x) for x in t):
+        if t and any(not generic(x) for x in t) and t not in self.relatives:
             self.relatives.append(t)
 
     def add_gender(self, value: str) -> None:

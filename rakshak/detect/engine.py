@@ -217,6 +217,26 @@ _HON_AFTER = re.compile(r"[ 	]+(?:%s)(?![\wऀ-ॿ])" % "|".join(
     re.escape(h) for h in sorted(L.HONORIFICS_AFTER, key=len, reverse=True)), re.I)
 
 
+CHUNK_LIMIT = 100_000
+_CHUNK = 64_000
+
+
+def chunks(text: str):
+    """Split a very large text into ~64 KB pieces at a newline (else a space), so that no word, name or
+    number is cut; the pieces concatenate back to exactly the input."""
+    pos, n = 0, len(text)
+    while pos < n:
+        end = min(pos + _CHUNK, n)
+        if end < n:
+            cut = text.rfind("\n", pos + _CHUNK // 2, end)
+            if cut < 0:
+                cut = text.rfind(" ", pos + _CHUNK // 2, end)
+            if cut >= 0:
+                end = cut + 1
+        yield text[pos:end]
+        pos = end
+
+
 class Engine:
     def __init__(self, vault: Vault | None = None):
         self.vault = vault or Vault()
@@ -226,6 +246,10 @@ class Engine:
     # ------------------------------------------------------------------ pass 1: harvest from labelled text
     def harvest_text(self, text: str) -> None:
         if not text or not isinstance(text, str):
+            return
+        if len(text) > CHUNK_LIMIT:
+            for piece in chunks(text):
+                self.harvest_text(piece)
             return
         text = unhide(text)
         for kind, value in self._label_values(text):
@@ -406,6 +430,8 @@ class Engine:
         ID become its pseudonym, DOBs are jittered, and the remaining text has its dates shifted."""
         if not isinstance(text, str) or not text:
             return text
+        if len(text) > CHUNK_LIMIT:                    # very large text: bounded work per piece -> linear time
+            return "".join(self.clean(piece, hard_only, rec) for piece in chunks(text))
         text = unhide(text)
         spans = self.find(text)
         if hard_only:
@@ -472,11 +498,17 @@ def _phone_proximity_names(text: str, spans: list[Span]) -> list[Span]:
     anchors = [s for s in spans if s.kind in ("PHONE", "AADHAAR", "EMAIL", "PHONE_MASKED")]
     if not anchors:
         return []
+    import bisect
     out = []
-    for a in anchors:
-        ls = text.rfind("\n", 0, a.start) + 1
-        le = text.find("\n", a.end)
-        le = len(text) if le < 0 else le
+    nl = [i for i, ch in enumerate(text) if ch == "\n"]   # line index built once: O(n)
+    lines = set()
+    for a in anchors:                                   # each line is scanned once, however many phones it has
+        i = bisect.bisect_left(nl, a.start)
+        ls = nl[i - 1] + 1 if i > 0 else 0
+        j = bisect.bisect_left(nl, a.end)
+        le = nl[j] if j < len(nl) else len(text)
+        lines.add((ls, le))
+    for ls, le in sorted(lines):
         for m in _CAP_SEQ.finditer(text, ls, le):
             # trim known non-name words from both edges ("Visitor Ngurthansanga Hmar" -> the name)
             toks = list(re.finditer(r"[A-Za-z]+", m.group(1)))
@@ -581,14 +613,34 @@ def _crf_spans(text: str) -> list[Span]:
 
 
 def _resolve(spans: list[Span], protected: list[tuple[int, int]]) -> list[Span]:
+    """Highest priority / longest span wins; protected clinical terms veto soft spans.
+    O(n log n): overlap tests use binary search over sorted, non-overlapping intervals."""
+    import bisect
+    merged: list[list[int]] = []                       # protected intervals, merged
+    for ps, pe in sorted(protected):
+        if merged and ps <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], pe)
+        else:
+            merged.append([ps, pe])
+    p_starts = [m[0] for m in merged]
+
     def overlaps_protected(sp: Span) -> bool:
-        return any(sp.start < pe and ps < sp.end for ps, pe in protected)
+        i = bisect.bisect_left(p_starts, sp.end) - 1     # last protected interval starting before sp.end
+        return i >= 0 and merged[i][1] > sp.start
 
     kept = [sp for sp in spans if sp.kind in HARD or sp.kind == "AGE" or not overlaps_protected(sp)]
     kept.sort(key=lambda s: (-s.prio, -(s.end - s.start), s.start))
+    starts: list[int] = []
+    ends: list[int] = []
     chosen: list[Span] = []
     for sp in kept:
-        if all(sp.end <= c.start or sp.start >= c.end for c in chosen):
-            chosen.append(sp)
+        i = bisect.bisect_right(starts, sp.start)
+        if i > 0 and ends[i - 1] > sp.start:              # previous chosen span reaches into this one
+            continue
+        if i < len(starts) and starts[i] < sp.end:        # next chosen span starts inside this one
+            continue
+        starts.insert(i, sp.start)
+        ends.insert(i, sp.end)
+        chosen.append(sp)
     chosen.sort(key=lambda s: s.start)
     return chosen

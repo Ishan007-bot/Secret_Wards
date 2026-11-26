@@ -195,8 +195,8 @@ def build_contexts(jobs: list[Job], evs: dict, proc: Processor) -> dict:
         # the cluster's own names: each record's primary name and its spelling variants only. Other people
         # mentioned in the same document (a register, a log, JSON Lines) must never receive this pseudonym.
         primaries = [p for p in (e.primary_name() for e in members) if p]
-        names = [n for e in members for n in e.names + e.weak_names
-                 if not primaries or any(names_compatible(n, p) for p in primaries)]
+        names = list(dict.fromkeys(n for e in members for n in e.names + e.weak_names
+                                   if not primaries or any(names_compatible(n, p) for p in primaries)))
         ids = set()
         for e in members:
             ids |= e.ids

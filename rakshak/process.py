@@ -10,7 +10,7 @@ import re
 from collections import Counter
 
 from .detect import columns as C
-from .detect.engine import Engine
+from .detect.engine import CHUNK_LIMIT, Engine, chunks
 from .detect.hidden import decode_b64_text, encode_b64_text
 from .detect.textnorm import digits_only, is_devanagari
 from .detect.unhide import unhide
@@ -134,6 +134,10 @@ class Processor:
 
     def evidence_from_text(self, ev: Evidence, text: str, month_first: bool) -> None:
         if _INERT.fullmatch(text):
+            return
+        if len(text) > CHUNK_LIMIT:                    # very large text: evidence piece by piece
+            for piece in chunks(text):
+                self.evidence_from_text(ev, piece, month_first)
             return
         text = unhide(text)
         self.rare.observe_text(text)
