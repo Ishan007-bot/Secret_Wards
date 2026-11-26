@@ -40,5 +40,15 @@ jobs:
           PY=$(which python)
           sudo unshare -n env RAKSHA_SECRET=ci-secret-a "$PY" main.py --input kit/dev/input --output out_offline
           diff -r out_a/sanitized out_offline/sanitized && diff out_a/records.jsonl out_offline/records.jsonl
+      - name: Hostile-input fuzzing (corrupted, truncated, NUL bytes, 5 MB single line, depth 199/201, odd names)
+        run: |
+          python tools/fuzz.py --kit kit --work fuzz1 --seed 1
+          python tools/fuzz.py --kit kit --work fuzz2 --seed 2
+      - name: Unseen-format generalisation (renamed columns/labels/IDs, new names, ';' CSVs, yyyy/mm/dd)
+        run: |
+          python tools/gen_chaos.py --kit kit --out chaos --seed 23 --hard
+          RAKSHA_SECRET=ci-secret-a python main.py --input chaos/input --output chaos_out
+          python kit/check_dev.py --output chaos_out --truth chaos/truth/truth.json | tee chaos.txt
+          grep -q "PERSONAL DATA: 0 of" chaos.txt && grep -q "CANARIES: 0 of" chaos.txt
       - name: Organiser pre-submit check (3 runs, determinism, secret, input untouched)
         run: python kit/check_submission.py --repo . --run | tee submit.txt && grep -q "READY TO SUBMIT" submit.txt
