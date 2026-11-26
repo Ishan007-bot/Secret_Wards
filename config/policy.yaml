@@ -1,0 +1,22 @@
+# Clarity privacy policy. Flat "key: value" lines (read by rakshak/policy.py, no PyYAML needed).
+
+# --- dates ---------------------------------------------------------------
+date_shift_min_days: 7       # |shift| is at least this (never 0)
+date_shift_max_days: 180     # |shift| is at most this; one secret shift per patient
+dob_jitter_min_days: 30      # DOB gets its own per-patient jitter
+dob_jitter_max_days: 365
+
+# --- age -------------------------------------------------------------------
+age_band_years: 10           # bands always contain the true age
+age_top_code: 85             # ages >= this become "85+"
+
+# --- location ----------------------------------------------------------------
+location_level: district     # village / mohalla -> district
+pin_prefix_digits: 3         # 229073 -> 229***
+
+# --- rare values / k-anonymity ----------------------------------------------
+k_anonymity: 3               # min patients per (age band, gender, district) cell
+rare_diagnosis_k: 3          # diagnoses held by fewer patients -> ICD-10 block
+
+# --- ingestion safety ------------------------------------------------------
+max_json_depth: 200          # deeper JSON is quarantined

@@ -1,0 +1,2 @@
+# Runtime dependencies. The pipeline currently uses only the Python standard library (3.10+).
+# Every dependency added here must install from a manylinux wheel and must not touch the network at run time.

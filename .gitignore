@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+# local run outputs
+out*/
+my_output*/
+*_out/
+# training data is downloaded locally and never committed
+training/data/
+# never commit the organiser practice data into the submission repo
+dev/

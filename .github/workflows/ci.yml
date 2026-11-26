@@ -1,0 +1,33 @@
+# On every push: run Clarity on the organiser practice data (fetched from the public kit, never
+# committed here), check the output contract, determinism, a different secret, and the self-check.
+name: ci
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Reinforce-SST/Secret-Wards-ToolKit
+          path: kit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Run twice with the same secret, once with another
+        run: |
+          RAKSHA_SECRET=ci-secret-a python main.py --input kit/dev/input --output out_a
+          RAKSHA_SECRET=ci-secret-a python main.py --input kit/dev/input --output out_b
+          RAKSHA_SECRET=ci-secret-c python main.py --input kit/dev/input --output out_c
+      - name: Contract
+        run: python kit/validate_output.py --input kit/dev/input --output out_a | tee contract.txt && grep -q "CONTRACT OK" contract.txt
+      - name: Deterministic
+        run: diff -r out_a/sanitized out_b/sanitized && diff out_a/records.jsonl out_b/records.jsonl
+      - name: Secret never written
+        run: "! grep -r -l 'ci-secret-a' out_a out_b"
+      - name: Practice self-check
+        run: python kit/check_dev.py --output out_a
