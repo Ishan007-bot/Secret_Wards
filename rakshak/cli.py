@@ -19,14 +19,19 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .detect.patterns import Detector
+from collections import Counter
+
+from .detect.engine import Engine
 from .formats import csv_tsv, json_doc
 from .io.decode import decode
 from .io.sniff import Quarantine, json_depth_exceeds, sniff
 from .policy import POLICY
+from .process import Processor
 from .report import write_report
 from .secure import log
-from .secure.secret import MissingSecret, secret
+from .secure.secret import MissingSecret, keyed, secret
+
+_B32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
 @dataclass
@@ -73,26 +78,45 @@ def load(path: Path, rel: str) -> Job:
     return job
 
 
-def rewrite(job: Job, det: Detector) -> None:
-    job.out_rel = job.rel  # M4: rename when the file name itself holds PII
+def harvest(job: Job, proc: Processor) -> None:
+    if job.kind in ("csv", "tsv"):
+        proc.csv_harvest(job.data)
+    elif job.kind == "json":
+        proc.json_harvest(job.data)
+    else:
+        proc.text_harvest(job.text)
+
+
+def safe_name(rel: str, taken: set[str]) -> str:
+    """Keyed, deterministic replacement for a file name that contains personal data."""
+    folder, _, name = rel.rpartition("/")
+    ext = name[name.rfind("."):] if "." in name else ""
+    n = int.from_bytes(keyed("fname", rel)[:8], "big")
+    length = 10
+    while True:
+        code = "".join(_B32[(n >> (5 * i)) & 31] for i in range(length))
+        cand = (folder + "/" if folder else "") + f"file_{code}{ext.lower()}"
+        if cand not in taken:
+            return cand
+        length += 1
+
+
+def rewrite(job: Job, proc: Processor) -> None:
     out_file = f"sanitized/{job.out_rel}"
     if job.kind in ("csv", "tsv"):
         delim = "\t" if job.kind == "tsv" else ","
         rows = job.data
-        out_rows = []
-        for i, row in enumerate(rows):
-            out_rows.append([det.clean_text(c) for c in row])
-            if i > 0:
-                job.records.append({"file": out_file, "loc": f"row:{i - 1}", "patient": None})
-        job.output_text = csv_tsv.write(out_rows, delim, csv_tsv.line_terminator(job.text)) if rows else ""
+        for i in range(1, len(rows)):
+            job.records.append({"file": out_file, "loc": f"row:{i - 1}", "patient": None})
+        job.output_text = csv_tsv.write(proc.csv_rewrite(rows), delim, csv_tsv.line_terminator(job.text)) if rows else ""
     elif job.kind == "json":
         for ptr in json_doc.record_pointers(job.data):
             job.records.append({"file": out_file, "loc": ptr, "patient": None})
-        job.output_text = json_doc.dump(det.clean_value(job.data), json_doc.detect_indent(job.text),
+        job.output_text = json_doc.dump(proc.json_rewrite(job.data), json_doc.detect_indent(job.text),
                                         job.text.endswith("\n"))
     else:
         job.records.append({"file": out_file, "loc": "doc", "patient": None})
-        job.output_text = det.clean_text(job.text)
+        job.output_text = proc.text_rewrite(job.text)
     job.status = "sanitized"
 
 
@@ -100,14 +124,29 @@ def run(inp: Path, out: Path) -> dict:
     t0 = time.monotonic()
     san = out / "sanitized"
     san.mkdir(parents=True, exist_ok=True)
-    det = Detector()
+    engine = Engine()
+    proc = Processor(engine)
 
     jobs = [load(p, p.relative_to(inp).as_posix()) for p in discover(inp)]          # P0
-    for job in jobs:                                                                 # P4
+    for job in jobs:                                                                 # P1 harvest
+        if job.status == "pending":
+            try:
+                harvest(job, proc)
+            except Exception as exc:  # noqa: BLE001
+                job.status, job.reason = "quarantined", "harvest_error_" + log.error_kind(exc).lower()
+
+    taken = {j.rel for j in jobs}                                                    # file names
+    for job in jobs:
+        job.out_rel = job.rel
+        if job.status == "pending" and proc.name_has_pii(job.rel):
+            job.out_rel = safe_name(job.rel, taken)
+            taken.add(job.out_rel)
+
+    for job in jobs:                                                                 # P4 rewrite
         if job.status != "pending":
             continue
         try:
-            rewrite(job, det)
+            rewrite(job, proc)
         except Exception as exc:  # noqa: BLE001 - fail safe: never export a half-cleaned file
             job.status, job.reason, job.records = "quarantined", "process_error_" + log.error_kind(exc).lower(), []
 
@@ -127,7 +166,9 @@ def run(inp: Path, out: Path) -> dict:
         for r in records:
             f.write(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n")
 
-    return write_report(out, files, records, det.entities, generalized=0, suppressed=0,
+    entities = Counter(engine.counts) + Counter(proc.role_counts)
+    entities.pop("AGE", None)  # age bands are generalisations, not identifier detections
+    return write_report(out, files, records, entities, generalized=proc.generalized_records, suppressed=0,
                         seconds=time.monotonic() - t0)
 
 

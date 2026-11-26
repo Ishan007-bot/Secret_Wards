@@ -1,0 +1,4 @@
+# Keep LF line endings everywhere (the evaluator runs Linux; byte-exact files matter).
+* text=auto eol=lf
+*.pdf binary
+*.crfsuite binary
