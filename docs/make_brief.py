@@ -131,26 +131,31 @@ def main():
                "<br/>• diagnoses held by a single patient: generalised to their ICD-10 chapter."))
     s.append(P("4. USP", h2))
     s.append(P("• <b>Learns from the data it is given:</b> the identity vault and learned ID shapes work on formats "
-               "nobody has seen. On two unseen-format datasets: 0 leaks, 0 canaries, detection 20/20 projected.<br/>"
+               "nobody has seen. On three unseen-format datasets: 0 leaks, 0 canaries, detection 20/20 projected.<br/>"
                "• <b>Cross-script, conflict-aware identity resolution:</b> F0.5 = 1.00 with 0 wrong merges; the homonym, "
                "language and fragment traps are all correct.<br/>"
                "• <b>Measured, not guessed:</b> our A1–A7 attacker and scorer drove a policy sweep. Removing the "
                "DOB was worth +5.3 points and k=5/30-year bands +1.8.<br/>"
                "• <b>An egress DLP gate</b> re-scans every byte with the evaluator's normalisation (homoglyphs, "
-               "zero-width, base64, %, \\u, HTML) and fails closed."))
+               "zero-width, base64, hex, %, \\u, HTML) and fails closed.<br/>"
+               "• <b>Adversarially hardened:</b> base64/hex payloads are decoded, cleaned and re-encoded; any "
+               "delimiter, .jsonl/.log/.psv, and dates in many formats incl. Hindi months are handled. An "
+               "independent LLM-written attack set (2,132 PII values) leaks <b>0</b>, and a 60-file hostile-input "
+               "fuzzer runs in CI. Every release reports its own measured k-anonymity in report.json."))
 
     s.append(KeepTogether([P("5. Privacy–utility trade-off (measured)", h2), table([
-        ["Measure", "Practice data", "Unseen-format data (2 seeds)"],
+        ["Measure", "Practice data", "Unseen-format data (3 seeds)"],
         ["Personal data still visible (overall / Hindi / Hinglish)", "0.0% / 0.0% / 0.0% (0 of 3,230)", "0.0% (0 of 3,230)"],
         ["Planted canaries found", "0 / 4", "0 / 4"],
+        ["Independent LLM-written attack set / hostile fuzz", "0 of 2,132 PII leaked", "60 files: no crash"],
         ["Medical values kept", "99.6%", "99.5%"],
-        ["Linking precision / recall / F0.5", "1.00 / 1.00 / 1.00", "1.00 / 0.98 / 0.995"],
+        ["Linking precision / recall / F0.5", "1.00 / 1.00 / 1.00", "1.00 / 0.92–0.99 / 0.98+"],
         ["Unique on (gender, age band, district) vs registry", "0.0% (raw: 33.3%)", "n/a (no registry)"],
         ["A4: patients confidently re-identified", "8.3% (raw: 97.9%)", "n/a"],
         ["A3 record linkage / A5 targeted (vs raw)", "4.3% / 68%", "n/a"],
         ["Known visit dates still visible", "0 / 14 (raw: 14 / 14)", "n/a"],
-        ["Run time / peak memory", "3–5 s / 30 MB; 1,600 files: 23 s / 92 MB", "same"],
-        ["Projected score (our scorer re-implementation)", "94.5 / 100, no penalties", "73.0 / 75 excl. privacy"],
+        ["Run time / peak memory", "3–5 s / 30 MB; 1,600 files: 16 s / 92 MB", "5 MB 1-line log: 20 s"],
+        ["Projected score (our scorer re-implementation)", "94.5 / 100, no penalties", "72.5–73.1 / 75 excl. privacy"],
     ], [W * 0.43, W * 0.31, W * 0.26])]))
     s.append(Spacer(1, 3))
     s.append(P("<b>Why these settings:</b> the whole generalisation sub-score is worth only 2 points, while the "

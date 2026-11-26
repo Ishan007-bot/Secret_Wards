@@ -75,6 +75,10 @@ input (read-only, never modified)
 | empty file | quarantined `empty_file` |
 | any unexpected error inside one file | that file is quarantined, the run continues, stderr shows the exception *type* only |
 | a FHIR file whose rewrite would break R4 validity | quarantined `fhir_invalid_after_rewrite` (never exported broken) |
+| `;`, `\|` or TAB used inside a `.csv` | the delimiter is sniffed from the file's own lines and written back unchanged |
+| `.psv`, `.jsonl` / `.ndjson`, `.log`, `.md`, `.text`, `.note` | sanitised (tables as tables; logs and JSON Lines as text, structure kept byte-for-byte) |
+| JSON Lines saved with a `.json` extension | sanitised line by line instead of being rejected as malformed |
+| a huge document (e.g. a 5 MB single-line log) | processed in ~64 KB pieces cut at line/word boundaries, so time stays linear |
 
 Every input file appears in `report.json`, and nothing is ever byte-copied. Ragged CSV rows, multi-line cells, CRLF endings, BOMs, the delimiter, JSON key order, indentation and value types are all preserved.
 
@@ -86,7 +90,10 @@ Every input file appears in `report.json`, and nothing is ever byte-copied. Ragg
 3. **Context rules.** These find what no list contains, including the planted canaries:
    - name and relative labels (`Pt Name -`, `नाम:`), relation markers (`S/o`, `W/o`, `C/O <name>`, `पति`), honorifics (`ji`, `sahab`, `behenji`, `bhaiya`, `श्री`);
    - **phone-proximity** (`called by <name> <phone>`, `<name> (attendant, bed 12), mob …`);
-   - address grammar (`H.No.`, `Makan No.`, `मकान नं.`, `Mohalla`, `near …`, `… के पास`).
+   - address grammar (`H.No.`, `Makan No.`, `मकान नं.`, `Mohalla`, `near …`, `… के पास`);
+   - honorific names with no label (`Smt. Kamla Devi`, `श्रीमती …`, but never `Shri Ram Hospital`), surname-first
+     names (`KHANNA, TEJAS`), apostrophe names (`D'Souza`), bare kinship labels (`Husband - …`), loose ID labels
+     (`Reg No. 2031/OPD/00456`, `IP No 31/1234`, `Policy no. …`), dotted phones and landlines.
 4. **A self-trained, name-agnostic CRF** adds recall on free text (see *Models and data*).
 5. **The clinical protection layer** keeps the meaning traps:
    - `Dr. <name>` stays even when a relative shares the first name;
@@ -94,7 +101,8 @@ Every input file appears in `report.json`, and nothing is ever byte-copied. Ragg
    - `Ward 4 (Medicine)`, `Bed 29`, `ASHA worker`;
    - doses and `1-0-1` schedules;
    - eponyms (`Bell's palsy`, `Parkinson's disease`).
-6. **Disguises are undone before detection** and again at the egress gate: `\uXXXX` escapes, HTML entities, %-encoding, zero-width characters, Cyrillic/Greek homoglyphs and full-width forms.
+6. **Disguises are undone before detection** and again at the egress gate: `\uXXXX` escapes, HTML entities, %-encoding, zero-width characters, Cyrillic/Greek homoglyphs and full-width forms. **Base64 and hex payloads** anywhere in a cell or note are decoded, cleaned and re-encoded in the same encoding (UUIDs and hashes are left alone).
+7. **Dates in any common form are shifted with their format kept:** `12/04/1977`, `1977-04-12T10:30+05:30`, `1977/04/12`, `1977.04.12`, `12-Apr-1977`, `12th April 1977`, `Apr 12 1977`, yearless `5 September`, and Hindi months (`12 अप्रैल 1977`, Devanagari digits).
 
 ### Linkage and pseudonyms
 This mirrors the dataset's own definition of "must link", and is conservative so that F0.5 stays high:
@@ -102,7 +110,9 @@ This mirrors the dataset's own definition of "must link", and is conservative so
 - **R1:** a shared strong identifier (hospital ID, Aadhaar, ABHA, phone, e-mail, insurance ID) that belongs to one person. An exclusivity check means a phone shared by a married couple never merges them.
 - **R2:** the same name plus a second clue (DOB, relative's name, or village + age ±1) whose combination is unique.
 
-Names are compared across scripts with our own Devanagari→Latin transliterator (schwa deletion, nukta folding), phonetic keys, a consonant skeleton and Jaro-Winkler. As a result, Mohammad = Mohd = मोहम्मद and Fatima ≈ Fatma, and token order is ignored. Every merge is checked at cluster level (DOB, gender, Aadhaar, age, name), so a chain of weak links can never fuse two people. When evidence is too weak, the record gets `null`.
+Names are compared across scripts with our own Devanagari→Latin transliterator (schwa deletion, nukta folding), phonetic keys, a consonant skeleton and Jaro-Winkler. As a result, Mohammad = Mohd = मोहम्मद, Fatima ≈ Fatma, Bhowmick = Bhaumik = भौमिक, Chowdhury = Chaudhary and Eshan = ईशान (Ishan), while Asha ≠ Usha and Sunita ≠ Sunil. Token order is ignored. Every merge is checked at cluster level (DOB, gender, Aadhaar, age, name), so a chain of weak links can never fuse two people. When evidence is too weak, the record gets `null`.
+
+In a document that mentions several people (a register, a log, JSON Lines), only the record's own patient receives its pseudonym. Every other person becomes a placeholder, never someone else's pseudonym.
 
 Pseudonyms are `PSN-` plus 8 Crockford base-32 characters from **HMAC-SHA256(secret, cluster)**. That is keyed, so it cannot be reversed by hashing originals, and it changes with the secret. The pseudonym is written **inside** each record: in the ID column, the `Patient:` line and the FHIR identifier.
 
@@ -117,6 +127,14 @@ Pseudonyms are `PSN-` plus 8 Crockford base-32 characters from **HMAC-SHA256(sec
 | diagnosis held by one patient | → its ICD-10 chapter (eponyms kept) | the "rare condition + age band" trap |
 | geolocation | rounded to 0.1° (~10 km) | |
 | file names with PII | keyed rename `file_<HMAC>.ext` | |
+
+**Every release measures itself.** `report.json` carries a PII-free `privacy_assessment` with these parts:
+
+- **the release's own k-anonymity** on (gender, age band, district), showing patients in cells below k before and after widening, unique patients and the median cell size;
+- **rare-diagnosis codes generalised**;
+- **the shift / DOB / location policy** applied.
+
+The report also carries `detection_layers`, the number of spans each layer removed (L1 patterns, L1 learned ID shapes, L2 vault, L3 context rules, L3 phone proximity, L4 CRF), and `egress_gate` statistics. All of these are counts only.
 
 ### Security design ("assume the server is breached")
 - **No raw or intermediate data ever touches disk:**
@@ -140,7 +158,7 @@ Pseudonyms are `PSN-` plus 8 Crockford base-32 characters from **HMAC-SHA256(sec
 | planted canaries found | **0 / 4** |
 | medical values kept | **99.6%** (4,835 / 4,855) |
 | linking precision / recall / F0.5 | **1.00 / 1.00 / 1.00** (0 wrong merges; homonym, language and fragment traps all correct) |
-| run time / peak memory | about 3–5 s / 30 MB (practice); 1,600 files: 23 s / 92 MB; 8 MB of Synthea FHIR: 13 s |
+| run time / peak memory | about 3–5 s / 30 MB (practice); 1,600 files: 16 s / 92 MB; 8 MB of Synthea FHIR: 13 s; a 5 MB single-line log: 20 s |
 | determinism | byte-identical across runs and across Windows / Linux (Docker) |
 
 **Re-identification, measured with our re-implementation of the published A1–A7 attacker** (`tools/attacker.py`):
@@ -157,17 +175,25 @@ Pseudonyms are `PSN-` plus 8 Crockford base-32 characters from **HMAC-SHA256(sec
 Our projected score with a re-implementation of the published formulas (`tools/selfscore.py`) is **94.5 / 100**, with no penalties. That is an estimate, not the official score. For reference, the organisers' reference system scores about 80–85.
 
 ### Data we did not tune on
-These are unseen-format datasets from `tools/gen_chaos.py`, with two seeds. They have new pan-Indian names in both scripts, renamed columns (`Patient's Name`, `Contact#`, `Gram/Mohalla`), new labels (`Pt Name -`, `मरीज:`), new ID prefixes and new phone formats.
+These are unseen-format datasets from `tools/gen_chaos.py`, with three seeds. They have:
+
+- new pan-Indian names in both scripts;
+- renamed columns (`Patient's Name`, `Contact#`, `Gram/Mohalla`);
+- new labels (`Pt Name -`, `मरीज:`);
+- new ID prefixes and new phone formats;
+- for the `--hard` seed, `;`-delimited CSVs and `yyyy/mm/dd` dates as well.
 
 | Measure | Result |
 |---|---|
-| leaks | 0 / 3,230 |
-| canaries | 0 / 4 |
-| medical values kept | 99.5% |
-| linking F0.5 | 0.995 |
-| projected non-privacy points | 72.6–73.0 of 75 (practice: 73.6) |
+| leaks | **0 / 3,230** on every seed |
+| canaries | **0 / 4** |
+| medical values kept | 99.5–99.6% |
+| linking F0.5 | 0.98–1.00, with 0 wrong merges |
+| projected non-privacy points | 72.5–73.1 of 75 (practice: 73.6) |
 
 Other unseen tests:
+- **An independent adversarial dataset written by a different LLM** (36 files, 2,132 PII values, with traps, homoglyphs, zero-width characters, `\u` escapes, base64 and broken files): **0 leaks**. Its 6 findings (apostrophe surnames, a sentence-ending full stop inside a relative's name, "village." read as a label, villages named like districts, base64 lines in notes, generic surnames) were all fixed, and each is now a regression test.
+- **Hostile-input fuzzing** (`tools/fuzz.py`, 60 files per seed: byte flips, truncation, NUL bytes, 5 MB single lines, JSON depth 199/201, NaN, odd Unicode file names): exit 0, every file reported, nothing copied raw, no leaks. CI runs it on every push.
 - **Synthetic Indian discharge notes from another author (Mendeley):** 99% of patient names removed in a format never seen before.
 - **Synthea FHIR bundles:** still valid R4 after sanitising.
 
@@ -191,13 +217,15 @@ Other unseen tests:
 
 ## Reproduce and self-test
 ```bash
-python -m unittest discover -s tests                         # 54 unit / end-to-end tests (synthetic fixtures)
+python -m unittest discover -s tests                         # 61 unit / end-to-end tests (synthetic fixtures)
 python tools/audit_repo.py --kit ../Secret-Wards-ToolKit     # no practice data in the repo
 RAKSHA_SECRET=a python main.py --input ../Secret-Wards-ToolKit/dev/input --output out_a
 python ../Secret-Wards-ToolKit/validate_output.py --input ../Secret-Wards-ToolKit/dev/input --output out_a
 python ../Secret-Wards-ToolKit/check_dev.py --output out_a
 python tools/selfscore.py --kit ../Secret-Wards-ToolKit --output out_a      # projected score + attacker
-python tools/gen_chaos.py --kit ../Secret-Wards-ToolKit --out chaos --seed 11 # unseen-format test set
+python tools/gen_chaos.py --kit ../Secret-Wards-ToolKit --out chaos --seed 11 --hard  # unseen-format test set
+python tools/fuzz.py --kit ../Secret-Wards-ToolKit --work fuzz --seed 1      # hostile / broken inputs
+tools/regress.sh ../Secret-Wards-ToolKit work [extra dataset]                # the full regression gate
 python tools/policy_sweep.py --kit ../Secret-Wards-ToolKit --work sweep     # privacy/utility trade-off
 tools/sandbox.sh <input> <output>          # fresh clone in python:3.12-slim, --network none, 2 CPU, 4 GB
 pip install -r training/requirements-train.txt && python training/fetch_external.py   # retrain (optional)
@@ -207,6 +235,7 @@ CI runs all of this on Linux on every push:
 - unit tests and the repo audit;
 - three runs, then the contract check, a determinism diff, a grep for the secret, and the kit self-check;
 - the projected score;
+- hostile-input fuzzing (two seeds) and an unseen-format leak gate (`gen_chaos --hard`);
 - a run with networking disabled (`unshare -n`), which must give identical bytes;
 - `check_submission.py --run`, which must print **READY TO SUBMIT**.
 
