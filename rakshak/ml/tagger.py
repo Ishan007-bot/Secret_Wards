@@ -24,6 +24,8 @@ class Tagger:
             self.labels: list[str] = m["labels"]
             self.state: dict[str, list[float]] = {k: v for k, v in m["state"].items()}
             self.trans: list[list[float]] = m["trans"]
+            self._exp_trans = [[math.exp(w) for w in row] for row in self.trans]
+            self._cache: dict = {}
             self.threshold: float = float(m.get("threshold", 0.5))
             self.max_chars: int = int(m.get("max_chars", 200000))
             self.ok = True
@@ -34,6 +36,16 @@ class Tagger:
         """(start, end, entity type, confidence) for NAME / ADDR spans the model finds."""
         if not self.ok or not text or len(text) > self.max_chars:
             return []
+        hit = self._cache.get(text)
+        if hit is not None:
+            return hit
+        res = self._spans(text)
+        if len(self._cache) > 20000:
+            self._cache.clear()
+        self._cache[text] = res
+        return res
+
+    def _spans(self, text: str):
         toks = tokenize(text)
         if len(toks) < 4:
             return []
@@ -62,18 +74,34 @@ class Tagger:
                         row[k] += w[k]
             emit.append(row)
         n = len(emit)
-        T = self.trans
-        # forward-backward in log space -> per-token marginals
-        alpha = [emit[0][:]]
+        ET = self._exp_trans
+        # scaled forward-backward in probability space (numerically safe, ~10x faster than log space)
+        pe = []
+        for row in emit:
+            m = max(row)
+            pe.append([math.exp(x - m) for x in row])
+        alpha, scale = [], []
+        a0 = pe[0][:]
+        z = sum(a0)
+        alpha.append([x / z for x in a0])
+        scale.append(z)
         for t in range(1, n):
             prev = alpha[-1]
-            alpha.append([emit[t][j] + _lse([prev[i] + T[i][j] for i in range(L)]) for j in range(L)])
-        beta = [[0.0] * L for _ in range(n)]
+            cur = [pe[t][j] * sum(prev[i] * ET[i][j] for i in range(L)) for j in range(L)]
+            z = sum(cur) or 1e-300
+            alpha.append([x / z for x in cur])
+            scale.append(z)
+        beta = [[1.0] * L for _ in range(n)]
         for t in range(n - 2, -1, -1):
             nxt = beta[t + 1]
-            beta[t] = [_lse([T[i][j] + emit[t + 1][j] + nxt[j] for j in range(L)]) for i in range(L)]
-        z = _lse(alpha[-1])
-        marg = [[math.exp(alpha[t][k] + beta[t][k] - z) for k in range(L)] for t in range(n)]
+            row = [sum(ET[i][j] * pe[t + 1][j] * nxt[j] for j in range(L)) for i in range(L)]
+            z = scale[t + 1]
+            beta[t] = [x / z for x in row]
+        marg = []
+        for t in range(n):
+            m = [alpha[t][k] * beta[t][k] for k in range(L)]
+            z = sum(m) or 1e-300
+            marg.append([x / z for x in m])
         o = self.labels.index("O")
         out, cur = [], None
         for t in range(n):

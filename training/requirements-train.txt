@@ -1,0 +1,6 @@
+# Training / evaluation only. NOT installed by the evaluator (the runtime needs nothing beyond the stdlib).
+sklearn-crfsuite==0.5.0
+python-crfsuite==0.9.12
+scikit-learn==1.9.1
+Faker==40.63.0
+huggingface_hub==2.4.0

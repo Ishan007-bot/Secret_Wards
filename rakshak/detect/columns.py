@@ -227,6 +227,8 @@ def _classify_json_path(keys: tuple, resource: str | None) -> str:
                     "state": STATE, "country": STATE}.get(leaf_l, TEXT)
         if leaf_l in ("display",) and parent in ("subject", "patient", "beneficiary", "individual", "for"):
             return NAME
+        if "name" in anc and leaf_l in ("use", "prefix", "suffix", "start", "end"):
+            return KEEP          # HumanName.use is a code; "Mr."/"Dr." prefixes and periods are not names
         if "name" in anc or leaf_l == "name":
             if "contact" in anc or resource == "RelatedPerson":
                 return RELATIVE

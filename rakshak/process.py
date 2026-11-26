@@ -136,7 +136,7 @@ class Processor:
         text = unhide(text)
         self.rare.observe_text(text)
         ev.dx |= {m.group(1).upper() for m in RX_ICD.finditer(text)}
-        for sp in self.engine.find(text):
+        for sp in self.engine.find(text, crf=False):   # CRF hits never create linkage evidence
             s = text[sp.start:sp.end]
             k = sp.kind
             if k == "MRN":
@@ -373,7 +373,13 @@ class Processor:
                 if len(names) > 1:
                     cur.add_name(" ".join(names))
             out = {} if mode == "rewrite" else None
+            geo = node.get("url") in ("latitude", "longitude") or any(
+                str(k).lower() in _GEO_KEYS for k in node)
             for k, v in node.items():
+                if mode == "rewrite" and geo and isinstance(v, float) and (
+                        k == "valueDecimal" or str(k).lower() in _GEO_KEYS):
+                    out[k] = round(v, 1)          # exact coordinates locate a home: keep ~10 km only
+                    continue
                 child_ptr = ptr + [json_doc.escape_token(str(k))] if ptr is not None else None
                 if ext_person and k == "valueString":
                     if mode == "harvest":
@@ -444,6 +450,9 @@ class Processor:
         probe = re.sub(r"[_]+", " ", stem)
         spans = self.engine.find(probe) + self.engine.find(stem)
         return any(s.kind != "AGE" for s in spans)
+
+
+_GEO_KEYS = {"lat", "lng", "lon", "long", "latitude", "longitude"}
 
 
 def _whole_digit_run(text: str, s: int, e: int) -> bool:

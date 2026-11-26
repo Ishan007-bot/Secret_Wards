@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from ..detect.engine import _PROTECT
+from ..detect.engine import _PROTECT, _UUID
 from ..detect.hidden import decode_b64_text
 from ..detect.unhide import scan_form, unhide
 
@@ -35,7 +35,10 @@ def find_leaks(text: str, vault) -> int:
     form = scan_form(raw)
     hits = 0
     cv = vault.compiled()
+    uuids = [(u.start(), u.end()) for u in _UUID.finditer(form)]   # random resource ids: never personal
     for m in _DIGIT_RUN.finditer(form):
+        if uuids and any(us <= m.start() and m.end() <= ue for us, ue in uuids):
+            continue
         d = re.sub(r"\D", "", m.group(0))
         kind = cv.digits.get(d) or (cv.digits.get(d[-10:]) if len(d) in (11, 12) else None)
         if kind in _GATE_KINDS and len(d) >= 6:

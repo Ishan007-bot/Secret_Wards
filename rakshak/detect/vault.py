@@ -104,6 +104,8 @@ class Vault:
         if fold(v) in _JUNK or not re.search(r"\d", v) or len(v) > 40:
             return
         self.ids[v.upper()] = kind
+        if _UUID_ID.fullmatch(v):
+            return   # a random UUID used as an ID: its digit fragments are not identifiers (FHIR resource ids)
         full = re.sub(r"[^A-Z0-9]", "", ascii_digits(v).upper())
         # digit cores: the full digit string and every long digit group (the scorer matches digit cores)
         groups = re.findall(r"\d+", ascii_digits(v))
@@ -146,6 +148,7 @@ def id_shape(value: str) -> str | None:
     return r"[-/ _.:]?".join(out)
 
 
+_UUID_ID = re.compile(r"(?:urn:uuid:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _WORD = re.compile(r"[A-Za-z0-9]+|[ऀ-ॣ०-ॿ]+")
 _GAP = re.compile(r"[\s_.,\-]*")
 

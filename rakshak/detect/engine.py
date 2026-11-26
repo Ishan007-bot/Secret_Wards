@@ -231,7 +231,7 @@ class Engine:
                 yield kind, text[s:e]
 
     # ------------------------------------------------------------------ pass 2: find spans
-    def find(self, text: str) -> list[Span]:
+    def find(self, text: str, crf: bool = True) -> list[Span]:
         if not text:
             return []
         norm = ascii_digits(text)
@@ -272,7 +272,7 @@ class Engine:
 
         protected = [(m.start(), m.end()) for rx in _PROTECT for m in rx.finditer(text)]   # L5
         spans.extend(_phone_proximity_names(text, spans))                                 # L3b
-        if POLICY.get("ml_tagger") == "on":                                               # L4 (CRF)
+        if crf and POLICY.get("ml_tagger") == "on":                                       # L4 (CRF)
             spans.extend(_crf_spans(text))
         uuids = [(m.start(), m.end()) for m in _UUID.finditer(text)]
         if uuids:  # resource ids / references are random UUIDs: never personal data, never touched

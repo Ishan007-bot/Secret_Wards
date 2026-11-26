@@ -18,6 +18,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+      - name: Repo audit (no practice names / identifiers, no banned packages, no network imports)
+        run: python tools/audit_repo.py --kit kit
       - name: Run twice with the same secret, once with another
         run: |
           RAKSHA_SECRET=ci-secret-a python main.py --input kit/dev/input --output out_a
@@ -31,6 +33,8 @@ jobs:
         run: "! grep -r -l 'ci-secret-a' out_a out_b"
       - name: Practice self-check
         run: python kit/check_dev.py --output out_a
+      - name: Projected score (our re-implementation of the published scorer + attacker)
+        run: python tools/selfscore.py --kit kit --output out_a --rerun out_b --other out_c
       - name: Run with networking disabled (like the evaluator sandbox)
         run: |
           PY=$(which python)

@@ -40,6 +40,7 @@ forwarded attachment message msg pm am
 NAME_MORPHEMES = ("esh", "endra", "ita", "preet", "deen", "uddin", "kumar", "ansh", "jeet", "inder", "want",
                   "vati", "wati", "ini", "eem", "ima", "ana", "ika", "ali", "aan", "ain", "esha", "ish",
                   "raj", "lal", "nath", "jit", "dev", "deep", "pal", "bir", "ram", "ina", "een")
+_MORPH_IDX = {m: i for i, m in enumerate(NAME_MORPHEMES)}
 _FIRST = frozenset(L.FIRST_NAMES)
 _SUR = frozenset(L.SURNAMES)
 _CLIN = frozenset(L.CLINICAL_WORDS)
@@ -158,10 +159,13 @@ def sent_features(text: str, toks: list[tuple[int, int, str]]) -> list[list[str]
             f.append("hon_before")
         if lw in _REGION:
             f.append("region")
-        for m in NAME_MORPHEMES:
-            if lw.endswith(m) and len(lw) > len(m) + 1:
-                f.append("morph=" + m)
-                break
+        best = None
+        for k in range(2, 6):                      # same choice as "first NAME_MORPHEMES entry that matches"
+            m = lw[-k:]
+            if len(m) == k and m in _MORPH_IDX and len(lw) > k + 1 and (best is None or _MORPH_IDX[m] < _MORPH_IDX[best]):
+                best = m
+        if best:
+            f.append("morph=" + best)
         f.append("lab=" + label_cls[i])
         f.append("pos=" + str(min(after_colon[i], 6)))
         if line_phone.get(line_of[i]):
