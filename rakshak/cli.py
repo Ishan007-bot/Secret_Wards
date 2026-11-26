@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .detect.engine import Engine
-from .formats import csv_tsv, json_doc
+from .formats import csv_tsv, fhir, json_doc
 from .link.context import RecordCtx
 from .link.linker import Linker
 from .link.pseudonym import PseudonymIssuer
@@ -272,8 +272,10 @@ def rewrite(job: Job, proc: Processor, ctxs: dict) -> None:
     elif job.kind == "json":
         pointers = json_doc.record_locs(job.data)
         recmap = {p: rec_for(p) for p in pointers}
-        job.output_text = json_doc.dump(proc.json_rewrite(job.data, recmap), json_doc.detect_indent(job.text),
-                                        job.text.endswith("\n"))
+        new_data = proc.json_rewrite(job.data, recmap)
+        if fhir.is_fhir(job.data) and fhir.new_problems(job.data, new_data):
+            raise Quarantine("fhir_invalid_after_rewrite")   # never export a FHIR resource we broke
+        job.output_text = json_doc.dump(new_data, json_doc.detect_indent(job.text), job.text.endswith("\n"))
         for p in pointers:
             rec = recmap[p]
             job.records.append(_record(out_file, p, rec))

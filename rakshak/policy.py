@@ -10,6 +10,7 @@ DEFAULTS = {
     "date_shift_max_days": 180,
     "dob_jitter_min_days": 30,
     "dob_jitter_max_days": 365,
+    "dob_mode": "remove",
     "age_band_years": 10,
     "age_top_code": 85,
     "location_level": "district",

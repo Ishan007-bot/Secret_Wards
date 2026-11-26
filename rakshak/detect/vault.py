@@ -28,6 +28,7 @@ class Vault:
         self.ids: dict[str, str] = {}             # exact ID string (upper) -> kind
         self.id_shapes: set[str] = set()          # regex sources learned from ID values
         self.core_to_id: dict[str, str] = {}      # digit core -> normalised full ID ("" if ambiguous)
+        self.keep: set[str] = set()               # values released on purpose (districts): never vaulted
         self._compiled = None
 
     # ------------------------------------------------------------------ harvesting
@@ -61,6 +62,10 @@ class Vault:
         if re.fullmatch(r"(?:ward|bed|room|block|sector|floor|gali|lane|no)\s*\d{1,3}", f):
             return  # too generic to search globally ("Ward 4" is also a hospital ward); removed in context
         self._put(self.texts, f, kind)
+        self._compiled = None
+
+    def keep_text(self, value: str) -> None:
+        self.keep.add(fold(re.sub(r"\s+", " ", str(value)).strip(" ,.;:-")))
         self._compiled = None
 
     def add_address(self, value: str) -> None:
@@ -166,6 +171,8 @@ class _Compiled:
         self.phrases: dict[str, list] = {}
         for store, src in ((v.full_names, "vault_full"), (v.texts, "vault_text")):
             for p, kind in store.items():
+                if src == "vault_text" and p in v.keep:
+                    continue
                 toks = tuple(t.casefold() for t in _WORD.findall(p))
                 if toks:
                     self.phrases.setdefault(toks[0], []).append((toks, kind, src))

@@ -35,7 +35,7 @@ ROLE_ENTITY = {
     C.LANDMARK: "ADDRESS", C.VILLAGE: "VILLAGE", C.PIN: "PIN", C.DOB: "DOB",
 }
 _REL_PREFIX = re.compile(r"^\s*((?:S|D|W|C|H)\s*[/.\\]\s*O\.?|पुत्र|पुत्री|पत्नी|पति)\s*[:\-]?\s*", re.I)
-_GENERALISED = (C.AGE, C.AGE_SEX, C.VILLAGE, C.PIN, C.DOB)
+_GENERALISED = (C.AGE, C.AGE_SEX, C.VILLAGE, C.TEHSIL, C.PIN, C.DOB)
 
 
 def _blank(v) -> bool:
@@ -74,8 +74,10 @@ class Processor:
             vt.add_address(v)
         elif role in (C.HOUSE, C.LOCALITY, C.LANDMARK):
             vt.add_text(v, "ADDRESS")
-        elif role == C.VILLAGE:
+        elif role in (C.VILLAGE, C.TEHSIL):
             vt.add_text(v, "VILLAGE")
+        elif role == C.DISTRICT:
+            vt.keep_text(v)          # a district is released on purpose: never redact it via the vault
         elif role == C.PIN:
             vt.add_digits(v, "PIN")
         elif role in (C.TEXT, C.KEEP) and isinstance(value, str):
@@ -185,7 +187,7 @@ class Processor:
             return rec.psn
         if role == C.DOB:
             self.role_counts["DOB"] += 1
-            if rec is not None and rec.shifter is not None and isinstance(value, str):
+            if POLICY["dob_mode"] == "jitter" and rec is not None and rec.shifter is not None                     and isinstance(value, str):
                 jittered = rec.shifter.shift_text(value, dob=True)
                 if jittered != value:
                     return jittered
@@ -197,7 +199,7 @@ class Processor:
                 if m:
                     return value[:m.end()] + "[RELATIVE]"
             return ROLE_PLACEHOLDER[role]
-        if role == C.VILLAGE:
+        if role in (C.VILLAGE, C.TEHSIL):        # location_level: district
             self.role_counts["VILLAGE"] += 1
             district = (ctx or {}).get(C.DISTRICT)
             return district if district else "[LOCATION]"
@@ -377,6 +379,12 @@ class Processor:
                         self.evidence_from_role(cur, C.RELATIVE, v, month_first)
                     else:
                         out[self._clean_key(k, out)] = self.rewrite(C.RELATIVE, v, None, cur)
+                    continue
+                if (mode == "rewrite" and resource and isinstance(v, str) and POLICY["dob_mode"] == "remove"
+                        and C.classify_json_path(keys + [k], resource) == C.DOB):
+                    self.role_counts["DOB"] += 1          # FHIR date type: a placeholder would be invalid R4,
+                    if cur is not None:                   # so the element is dropped (it is optional)
+                        cur.generalized = True
                     continue
                 res = self._walk(v, keys + [k], resource, mode, local_ctx, child_ptr, recmap, cur, month_first)
                 if mode == "rewrite":

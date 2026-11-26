@@ -45,6 +45,9 @@ def chapter(code: str) -> tuple[str, str] | None:
     return None
 
 
+_EPONYM = re.compile(r"[A-Z][a-z]+(?:'s|s'|’s)\s")
+
+
 class RareDx:
     def __init__(self):
         self.code_display: dict[str, set] = {}     # code -> display strings seen next to it
@@ -63,7 +66,10 @@ class RareDx:
             self.observe_pair(m.group(2), m.group(1))
 
     def set_rare(self, codes: set[str]) -> None:
-        self.rare_codes = {c for c in codes if chapter(c)}
+        # eponymous diagnoses ("Bell's palsy", "Wilson's disease") are kept: they are the classic
+        # name-lookalike meaning trap, and rewriting them reads as over-redaction of clinical text
+        self.rare_codes = {c for c in codes if chapter(c) and not any(
+            _EPONYM.search(d) for d in self.code_display.get(c, ()))}
         self._map = {}
         for c in self.rare_codes:
             rng, title = chapter(c)

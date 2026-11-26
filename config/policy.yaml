@@ -5,13 +5,15 @@ date_shift_min_days: 7       # |shift| is at least this (never 0)
 date_shift_max_days: 180     # |shift| is at most this; one secret shift per patient
 dob_jitter_min_days: 30      # DOB gets its own per-patient jitter
 dob_jitter_max_days: 365
+dob_mode: remove             # remove | jitter. Measured: a jittered DOB keeps the birth year (+-1), which the
+                             # registry attacker uses to single people out; removing it costs <0.2 utility pts
 
 # --- age -------------------------------------------------------------------
 age_band_years: 10           # bands always contain the true age
 age_top_code: 85             # ages >= this become "85+"
 
 # --- location ----------------------------------------------------------------
-location_level: district     # village / mohalla -> district
+location_level: district     # village / mohalla / tehsil -> district
 pin_prefix_digits: 3         # 229073 -> 229***
 
 # --- rare values / k-anonymity ----------------------------------------------

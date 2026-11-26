@@ -15,6 +15,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from ..privacy.ages import band_text
+from ..policy import POLICY
 from . import lexicon as L
 from .textnorm import DEVA, ascii_digits, digits_only, is_devanagari
 from .unhide import unhide
@@ -198,6 +199,10 @@ def _looks_like_name(value: str) -> bool:
     return words[0][:1].isupper()
 
 
+_HON_AFTER = re.compile(r"[ 	]+(?:%s)(?![\wऀ-ॿ])" % "|".join(
+    re.escape(h) for h in sorted(L.HONORIFICS_AFTER, key=len, reverse=True)), re.I)
+
+
 class Engine:
     def __init__(self, vault: Vault | None = None):
         self.vault = vault or Vault()
@@ -341,11 +346,18 @@ class Engine:
         if not spans:
             return shift(text)
         out, pos = [], 0
-        for sp in spans:
+        for i, sp in enumerate(spans):
+            if sp.start < pos:
+                continue
             out.append(shift(text[pos:sp.start]))
             out.append(self._replacement(sp, text[sp.start:sp.end], rec))
             self.counts[sp.kind] += 1
             pos = sp.end
+            if sp.kind in ("PATIENT", "RELATIVE"):
+                # "Kamal Bhaiya", "Anita ji": the kinship/honorific word is part of the name mention
+                m = _HON_AFTER.match(text, pos)
+                if m and (i + 1 >= len(spans) or spans[i + 1].start >= m.end()):
+                    pos = m.end()
         out.append(shift(text[pos:]))
         return "".join(out)
 
@@ -357,7 +369,7 @@ class Engine:
                     return band_text(surface, rec.age_width) or sp.repl
             return sp.repl
         if rec is not None:
-            if sp.kind == "DOB" and rec.shifter is not None:
+            if sp.kind == "DOB" and rec.shifter is not None and POLICY["dob_mode"] == "jitter":
                 jittered = rec.shifter.shift_text(surface, dob=True)
                 if jittered != surface:
                     rec.generalized = True
