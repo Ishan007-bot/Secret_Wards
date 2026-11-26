@@ -238,3 +238,37 @@ class Units(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForcedFailure(unittest.TestCase):                                 # T-DS-04
+    def test_exception_quarantines_file_and_leaks_nothing(self):
+        import contextlib
+        import io
+        from rakshak import cli
+        from rakshak.process import Processor
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "in").mkdir()
+        (tmp / "in" / "a.txt").write_text("Patient: Tejasvi Halder, BP 120/80\n", encoding="utf-8")
+        (tmp / "in" / "b.txt").write_text("Routine note, BP 118/76\n", encoding="utf-8")
+        orig = Processor.text_rewrite
+
+        def boom(self, text, rec=None):
+            if "Tejasvi" in text:
+                raise ValueError("cannot handle Tejasvi Halder 9876501234")
+            return orig(self, text, rec)
+        Processor.text_rewrite = boom
+        err, out = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                cli.run(tmp / "in", tmp / "out")
+        finally:
+            Processor.text_rewrite = orig
+        rep = json.loads((tmp / "out" / "report.json").read_text(encoding="utf-8"))
+        status = sorted(e["status"] for e in rep["files"])
+        self.assertEqual(status, ["quarantined", "sanitized"])
+        reasons = [e.get("reason") for e in rep["files"] if e["status"] == "quarantined"]
+        self.assertEqual(reasons, ["process_error_valueerror"])
+        blob = err.getvalue() + out.getvalue() + json.dumps(rep)
+        self.assertNotIn("Tejasvi", blob)
+        self.assertNotIn("9876501234", blob)
+        self.assertFalse((tmp / "out" / "sanitized" / "a.txt").exists())
