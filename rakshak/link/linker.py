@@ -176,23 +176,39 @@ class Linker:
                 index.setdefault(k, []).append(r)
         for key in sorted(index, key=lambda k: (_KEY_RANK.get(k[0], 9), k)):
             rids = index[key]
-            if len(rids) < 2 or not self._exclusive(rids):
+            if len(rids) < 2:
                 continue
-            for r in rids[1:]:
-                self._merge(rids[0], r)
+            group = self._exclusive_group(rids)
+            for r in group[1:]:
+                self._merge(group[0], r)
 
-    def _exclusive(self, rids: list[str]) -> bool:
-        names = [n for n in (self.ev[r].primary_name() for r in rids) if n]
-        for i in range(len(names)):
-            for j in range(i + 1, len(names)):
-                if not names_compatible(names[i], names[j]):
-                    return False
+    def _exclusive_group(self, rids: list[str]) -> list[str]:
+        """Records sharing a strong key that belong to ONE person.
+
+        All named records agree -> all of them. One clear majority identity (>= 75% of the named
+        records) -> that majority plus the unnamed records; the outliers stay apart. Two substantial
+        identities (a couple sharing a phone) -> nobody is linked through this key."""
+        named = [(r, self.ev[r].primary_name()) for r in rids]
+        with_name = [(r, n) for r, n in named if n]
+        unnamed = [r for r, n in named if not n]
+        if not with_name:
+            return self._dob_consistent(rids)
+        best, best_members = None, []
+        for _, n in with_name:
+            members = [r for r, m in with_name if names_compatible(n, m)]
+            if len(members) > len(best_members):
+                best, best_members = n, members
+        if len(best_members) < 0.75 * len(with_name):
+            return []
+        return self._dob_consistent(sorted(best_members + unnamed))
+
+    def _dob_consistent(self, rids: list[str]) -> list[str]:
         dobs = [self.ev[r].dobs for r in rids if self.ev[r].dobs]
         for i in range(len(dobs)):
             for j in range(i + 1, len(dobs)):
                 if not (dobs[i] & dobs[j]):
-                    return False
-        return True
+                    return []
+        return rids
 
     # ------------------------------------------------------------------ R2
     def link_name_clues(self) -> None:

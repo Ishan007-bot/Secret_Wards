@@ -41,7 +41,7 @@ def peak_rss_mb() -> float:
 
 
 def write_report(out: Path, files: list[dict], records: list[dict], entities: dict,
-                 generalized: int, suppressed: int, seconds: float) -> dict:
+                 generalized: int, suppressed: int, seconds: float, extra: dict | None = None) -> dict:
     n_san = sum(1 for e in files if e["status"] == "sanitized")
     n_q = sum(1 for e in files if e["status"] == "quarantined")
     report = {
@@ -59,6 +59,7 @@ def write_report(out: Path, files: list[dict], records: list[dict], entities: di
             "records_quarantined": 0,
         },
         "entities": {k: int(v) for k, v in sorted(entities.items())},
+        **(extra or {}),
         "timing": {"seconds": round(seconds, 2)},
         "resources": {"peak_rss_mb": peak_rss_mb()},
     }

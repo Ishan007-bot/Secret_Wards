@@ -13,6 +13,7 @@ from .detect import columns as C
 from .detect.engine import Engine
 from .detect.hidden import decode_b64_text, encode_b64_text
 from .detect.textnorm import digits_only, is_devanagari
+from .detect.unhide import unhide
 from .formats import json_doc
 from .link.context import RecordCtx
 from .link.linker import Evidence, norm_id
@@ -128,6 +129,7 @@ class Processor:
             self.evidence_from_text(ev, decoded if decoded is not None else v, month_first)
 
     def evidence_from_text(self, ev: Evidence, text: str, month_first: bool) -> None:
+        text = unhide(text)
         self.rare.observe_text(text)
         ev.dx |= {m.group(1).upper() for m in RX_ICD.finditer(text)}
         for sp in self.engine.find(text):
@@ -244,6 +246,8 @@ class Processor:
             prof = C.profile_values(values)
             if prof and role not in C.PII_ROLES:
                 role = prof
+            if role == C.TEXT and C.profile_id_column(h, values):
+                role = C.ID_PRIMARY
             roles.append(role)
         for j in range(1, len(roles)):
             if roles[j] == C.TEXT and roles[j - 1] == C.RELATION:

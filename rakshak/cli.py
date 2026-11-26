@@ -27,6 +27,7 @@ from .link.context import RecordCtx
 from .link.linker import Linker
 from .link.pseudonym import PseudonymIssuer
 from .privacy.dates import Shifter, order_evidence
+from .secure.egress import find_leaks
 from .io.decode import decode
 from .io.sniff import Quarantine, json_depth_exceeds, sniff
 from .policy import POLICY
@@ -199,6 +200,31 @@ def build_contexts(jobs: list[Job], evs: dict, proc: Processor) -> dict:
     return ctxs
 
 
+def egress_gate(job: Job, proc: Processor, gate: Counter) -> None:
+    """Re-scan the finished output; re-clean once if anything identifying survived, else quarantine."""
+    if not find_leaks(job.output_text, proc.vault):
+        return
+    gate["rechecked"] += 1
+    eng = proc.engine
+    if job.kind == "json":
+        cleaned = json_doc.dump(_deep_clean(json.loads(job.output_text), eng), json_doc.detect_indent(job.text),
+                                job.text.endswith("\n"))
+    else:
+        cleaned = eng.clean(job.output_text)
+    if find_leaks(cleaned, proc.vault):
+        gate["blocked"] += 1
+        raise Quarantine("egress_blocked")
+    job.output_text = cleaned
+
+
+def _deep_clean(node, eng):
+    if isinstance(node, dict):
+        return {eng.clean(k): _deep_clean(v, eng) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_deep_clean(x, eng) for x in node]
+    return eng.clean(node) if isinstance(node, str) else node
+
+
 def _record(out_file: str, loc: str, rec: RecordCtx) -> dict:
     return {"file": out_file, "loc": loc, "patient": rec.psn if rec.used else None,
             "status": "generalized" if rec.generalized else "sanitized"}
@@ -264,12 +290,16 @@ def run(inp: Path, out: Path) -> dict:
                 job.status, job.reason = "quarantined", "evidence_error_" + log.error_kind(exc).lower()
     decide_date_order(jobs, evs)
     ctxs = build_contexts(jobs, evs, proc)                                           # P2 link
+    gate = Counter()
 
     for job in jobs:                                                                 # P4 rewrite
         if job.status != "pending":
             continue
         try:
             rewrite(job, proc, ctxs)
+            egress_gate(job, proc, gate)
+        except Quarantine as q:
+            job.status, job.reason, job.records = "quarantined", q.reason, []
         except Exception as exc:  # noqa: BLE001 - fail safe: never export a half-cleaned file
             job.status, job.reason, job.records = "quarantined", "process_error_" + log.error_kind(exc).lower(), []
 
@@ -291,8 +321,12 @@ def run(inp: Path, out: Path) -> dict:
 
     entities = Counter(engine.counts) + Counter(proc.role_counts)
     entities.pop("AGE", None)  # age bands are generalisations, not identifier detections
+    proc.gate = gate
     return write_report(out, files, records, entities, generalized=sum(1 for r in records if r.get("status") == "generalized"), suppressed=0,
-                        seconds=time.monotonic() - t0)
+                        seconds=time.monotonic() - t0,
+                        extra={"egress_gate": {"files_rechecked": gate["rechecked"],
+                                               "files_blocked": gate["blocked"]},
+                               "patients_pseudonymised": getattr(proc, "linked_clusters", 0)})
 
 
 def main(argv: list[str] | None = None) -> int:

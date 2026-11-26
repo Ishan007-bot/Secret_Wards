@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from ..privacy.ages import band_text
 from . import lexicon as L
 from .textnorm import DEVA, ascii_digits, digits_only, is_devanagari
+from .unhide import unhide
 from .vault import Vault
 
 HARD = {"PHONE", "AADHAAR", "AADHAAR_MASKED", "PHONE_MASKED", "ABHA_NUMBER", "ABHA_ADDRESS", "PAN", "EMAIL",
@@ -62,10 +63,12 @@ _DIGIT_RUN = re.compile(r"(?<![0-9])\+?\d(?:[\s\-./]?\d){3,17}(?![0-9])")
 # ---------------------------------------------------------------------------------------- L3
 _NAME_CH = rf"A-Za-z{DEVA}"
 _SEP = r"\s*[:：\-–]\s*"
-_LBL_NAME = (r"(?:Patient(?:'s|s)?\s*Name|Pt\.?\s*Name|Name\s+of\s+(?:the\s+)?Patient|Patient|Name|Naam|"
-             r"Mareez(?:\s+ka)?\s+Naam|मरीज़?\s+का\s+नाम|रोगी\s+का\s+नाम|नाम)")
+_LBL_NAME = (r"(?:Patient(?:'s|s)?\s*(?:Full\s*)?Name|Pt\.?\s*(?:Full\s*)?Name|Name\s+of\s+(?:the\s+)?Patient|Patient|"
+             r"Full\s*Name|Name|Naam|Pt\.?|Mareez(?:\s+ka)?(?:\s+Naam)?|Rogi(?:\s+ka)?(?:\s+Naam)?|"
+             r"मरीज़?\s+का\s+नाम|रोगी\s+का\s+नाम|मरीज़?|रोगी|नाम)")
 _LBL_REL = (r"(?:Attendant|Informant|Guardian|Father'?s?\s*Name|Husband'?s?\s*Name|Mother'?s?\s*Name|"
             r"Spouse(?:'s)?\s*Name|Spouse|Next\s+of\s+Kin|Relative(?:'s)?\s*Name|Relative|Caller|"
+            r"Accompanied\s+by|Brought\s+by|Escort|Rishtedar|Parijan|Kin|Emergency\s+Contact(?:\s+Name)?|"
             r"पति\s+का\s+नाम|पिता\s+का\s+नाम|माता\s+का\s+नाम|परिजन)")
 _LBL_REL_NOCOLON = r"(?:called\s+by|raised\s+by|witnessed\s+by|referred\s+by\s+(?!Dr)|brought\s+by|accompanied\s+by)"
 _LBL_ID = (r"(?:UHID|MRN|MR\s*No\.?|Reg(?:istration)?\.?\s*(?:No|Number|ID)\.?|Patient\s*ID|IPD\s*No\.?|"
@@ -137,6 +140,30 @@ _NON_PERSON_BEFORE_LABEL = re.compile(
     r"(?:Doctor|Dr|Consultant|Hospital|Test|Drug|Medicine|Lab|Ward|File|Facility|Department|Scheme|Package|"
     r"Procedure|Company|Insurer|Payer|Bank)['’]?s?\s*$", re.I)
 _VILLAGE_BAD_BEFORE = re.compile(r"\d\s*$")
+
+# generic "<Word(s)> No / # / ID :" labels whose value looks like an identifier
+RX_GENERIC_ID_LABEL = re.compile(r"(?<![A-Za-z])((?:[A-Z][A-Za-z.]{1,15}\s*){1,3})(?:No\.?|Number|#|ID|Id)\s*[:：\-–]\s*")
+_NOT_PATIENT_ID_LABEL = re.compile(r"\b(?:Bill|Invoice|Sample|Visit|Trip|Ticket|Bed|Ward|Room|Lot|Batch|Order|Test|"
+                                   r"Package|Claim|Receipt|Token|Serial|Sr|S\.?No|Item|Page|Version)\b", re.I)
+_ID_LIKE = re.compile(r"(?=.*\d)(?:[A-Za-z]{1,8}[-/:._ ]?\d[\d\-/:._]{2,}[A-Za-z]?|\d{5,})")
+
+# address grammar (Latin and Devanagari), for address text that carries no label
+_ADDRESS_GRAMMAR = [
+    ("HOUSE", re.compile(r"(?<![A-Za-z])(?:H\.?\s?No\.?|House(?:\s+No\.?)?|Makan(?:\s+No\.?)?|Flat(?:\s+No\.?)?|"
+                         r"Plot(?:\s+No\.?)?|Door(?:\s+No\.?)?|Qtr\.?(?:\s+No\.?)?)\s*[:\-]?\s*\d+[A-Za-z]?(?:/\d+)?\b",
+                         re.I)),
+    ("HOUSE", re.compile(r"मकान\s*(?:नं\.?|नंबर|संख्या)?\s*[\d०-९]+")),
+    ("LOCALITY", re.compile(r"(?<![A-Za-z])Mohalla\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2}")),
+    ("LOCALITY", re.compile(r"मोहल्ला\s+[ऀ-ॿ]+(?:\s+[ऀ-ॿ]+){0,2}")),
+    ("LOCALITY_WARD", re.compile(r"(?<![A-Za-z])Ward\s*(?:No\.?\s*)?\d{1,3}(?!\s*\()(?![\d/])")),
+    ("LOCALITY_WARD", re.compile(r"वार्ड\s*(?:नं\.?\s*)?[\d०-९]{1,3}")),
+    ("LANDMARK", re.compile(r"(?<![A-Za-z])(?:near|opp\.?|opposite|behind|beside|next\s+to)\s+(?:the\s+)?"
+                            r"[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}")),
+    ("LANDMARK", re.compile(r"[ऀ-ॿ]+(?:\s+[ऀ-ॿ]+){0,3}\s+(?:के\s+(?:पास|पीछे|सामने|बगल\s+में)|"
+                            r"की\s+ओर)")),
+]
+_ADDRESS_CONTEXT = re.compile(r"H\.?\s?No|House|Makan|Mohalla|Tehsil|Distt|District|Gram|Village|मकान|मोहल्ला|"
+                              r"तहसील|जिला|near|opp", re.I)
 _RELATIVE_BEFORE_NAME_LABEL = re.compile(
     r"(?:पिता|पति|माता|पत्नी|पुत्र|पुत्री|अभिभावक|Father|Husband|Mother|Spouse|Guardian|Wife|Relative|Attendant)"
     r"(?:'s|’s|s)?\s*(?:का|की|के)?\s*$", re.I)
@@ -180,6 +207,7 @@ class Engine:
     def harvest_text(self, text: str) -> None:
         if not text or not isinstance(text, str):
             return
+        text = unhide(text)
         for kind, value in self._label_values(text):
             if kind == "PATIENT":
                 self.vault.add_name(value, "PATIENT")
@@ -279,6 +307,18 @@ class Engine:
             v = re.match(r"[A-Za-z0-9](?:[A-Za-z0-9/_.\-]|:(?=[A-Za-z0-9]))*", text[m.end():])
             if v and re.search(r"\d", v.group(0)):
                 yield "MRN", (m.end(), m.end() + len(v.group(0).rstrip(".-/")))
+        for m in RX_GENERIC_ID_LABEL.finditer(text):           # unseen labels: "Hosp No:", "Regn #:"
+            if _NOT_PATIENT_ID_LABEL.search(m.group(1)):
+                continue
+            v = re.match(r"[A-Za-z0-9](?:[A-Za-z0-9/_.\-]|:(?=[A-Za-z0-9]))*", text[m.end():])
+            if v and _ID_LIKE.fullmatch(v.group(0).rstrip(".-/")):
+                yield "MRN", (m.end(), m.end() + len(v.group(0).rstrip(".-/")))
+        for kind, rx in _ADDRESS_GRAMMAR:                        # addresses with no label at all
+            for m in rx.finditer(text):
+                if kind == "LOCALITY_WARD" and not _ADDRESS_CONTEXT.search(
+                        text[max(0, m.start() - 40):m.end() + 40]):
+                    continue
+                yield "ADDRESS", (m.start(), m.end())
         for m in RX_ADDR_LABEL.finditer(text):
             line_end = text.find("\n", m.end())
             end = line_end if line_end >= 0 else len(text)
@@ -304,6 +344,7 @@ class Engine:
         ID become its pseudonym, DOBs are jittered, and the remaining text has its dates shifted."""
         if not isinstance(text, str) or not text:
             return text
+        text = unhide(text)
         spans = self.find(text)
         if hard_only:
             spans = [s for s in spans if s.kind in HARD]

@@ -97,6 +97,8 @@ def classify_header(header: str) -> str:
             "landline", "फोन", "फ़ोन", "मोबाइल", "sampark", "संपर्क"):
         return PHONE
     if _has(h, "uhid", "mrn", "mr no", "reg no", "registration no", "reg id", "registration id", "patient id",
+            "hospital no", "hosp no", "hosp id", "regn", "regn no", "mr number", "medical record", "record no",
+            "file no", "hospital number", "patient number",
             "patientid", "patient ref", "patient no", "pid", "crn", "cr no", "hospital id", "hospital uhid",
             "case no", "op no", "opd no", "pt id", "पंजीकरण", "panjikaran", "reg", "registration number"):
         return ID_PRIMARY
@@ -118,7 +120,8 @@ def classify_header(header: str) -> str:
         return HOUSE
     if _has(h, "landmark", "near"):
         return LANDMARK
-    if _has(h, "address", "addr", "pata", "पता", "street", "line", "residence", "location"):
+    if _has(h, "address", "addr", "pata", "पता", "street", "line", "residence", "location", "niwas", "nivas",
+            "निवास", "ghar", "residential"):
         return ADDRESS
     if _has(h, "name", "naam", "नाम", "patient", "pt", "full name", "first name", "last name", "firstname",
             "lastname", "given", "family", "surname", "first", "last", "मरीज़", "मरीज", "रोगी", "mareez"):
@@ -144,7 +147,30 @@ def profile_values(values: list[str]) -> str | None:
     for role, rx in ((PHONE, _RX_PHONE), (AADHAAR, _RX_AADHAAR), (EMAIL, _RX_EMAIL), (PAN, _RX_PAN)):
         if sum(1 for v in vals if rx.match(v)) >= 0.6 * n:
             return role
+    if sum(1 for v in vals if _RX_ADDRESS.search(v)) >= 0.5 * n:
+        return ADDRESS
     return None
+
+
+_RX_ADDRESS = re.compile(r"H\.?\s?No\.?\s*\d|House\s*(?:No\.?)?\s*\d|Makan\s*(?:No\.?)?\s*\d|Mohalla\s|Tehsil\s|"
+                         r"Distt\.?\s|मकान\s*नं|मोहल्ला|तहसील|जिला", re.I)
+_RX_IDLIKE = re.compile(r"^\s*[A-Z]{1,8}[-/:._ ]?\d{2,}(?:[-/:._ ]?\d+)*\s*$")
+_ID_HEADER_WORDS = ("no", "number", "id", "code", "ref", "regn", "hosp", "mr", "mrn", "card")
+_NOT_PATIENT_ID_HEADER = ("sample", "bill", "invoice", "visit", "trip", "ticket", "order", "test", "package",
+                          "claim", "receipt", "token", "serial", "item", "batch", "lot", "bed", "ward", "room",
+                          "loinc", "icd", "code")
+
+
+def profile_id_column(header: str, values: list[str]) -> bool:
+    """An unrecognised header that reads like an identifier column ('Hospital No', 'hosp_no', 'Regn #')
+    and whose values are mostly letter-prefixed codes is a patient ID column."""
+    h = norm_header(header)
+    if not any(_has(h, w) for w in _ID_HEADER_WORDS) and "#" not in header:
+        return False
+    if any(_has(h, w) for w in _NOT_PATIENT_ID_HEADER):
+        return False
+    vals = [v for v in values if v and v.strip()]
+    return bool(vals) and sum(1 for v in vals if _RX_IDLIKE.match(v)) >= 0.8 * len(vals)
 
 
 # ---------------------------------------------------------------------------------------- JSON keys

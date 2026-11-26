@@ -38,9 +38,10 @@ def main() -> int:
     ap.add_argument("--kit", required=True)
     ap.add_argument("--output", required=True)
     ap.add_argument("--limit", type=int, default=60)
+    ap.add_argument("--truth", default=None)
     a = ap.parse_args()
     kit, out = Path(a.kit), Path(a.output)
-    truth = json.loads((kit / "dev/truth/truth.json").read_text(encoding="utf-8"))
+    truth = json.loads(Path(a.truth or kit / "dev/truth/truth.json").read_text(encoding="utf-8"))
     report = json.loads((out / "report.json").read_text(encoding="utf-8"))
     renamed = {e["input_sha256"]: e["output"] for e in report["files"]}
     lost, leaks, canaries = [], Counter(), []
