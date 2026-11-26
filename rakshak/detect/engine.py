@@ -388,9 +388,8 @@ class Engine:
             if _VILLAGE_BAD_BEFORE.search(text[max(0, m.start() - 4):m.start()]):
                 continue  # "1 gram ..." is a dose, not a village
             lbl = m.group(0).rstrip()
-            if (lbl.endswith(".") and not re.match(r"vill\.", lbl, re.I)) or _THE_BEFORE.search(
-                    text[max(0, m.start() - 8):m.start()]):
-                continue  # "... of the village. TDS 0-0-1": a sentence end / common noun, not a label
+            if lbl.endswith(".") and not re.match(r"vill\.", lbl, re.I):
+                continue  # "... of the village. TDS 0-0-1": a sentence end, not a label
             s, e = _cut_value(text[m.end():])
             val = text[m.end() + s:m.end() + e]
             if val and not re.search(r"\d", val) and val.split()[0].lower() not in L.CLINICAL_WORDS:
@@ -533,7 +532,7 @@ def _region_word(w: str) -> bool:
 _SENTENCE = re.compile(r"[a-zऀ-ॿ]{3,}")
 _SURNAME_FIRST = re.compile(r",[ \t]*([A-Z][A-Za-z]+|[A-Z]+)(?=[ \t]*(?:$|[\n,;|(]|[ \t]{2}))", re.M)
 _SENTENCE_END = re.compile(r"(?<=[a-z]{3})\.(?=[ 	])")
-_THE_BEFORE = re.compile(r"(?:the|of|this|that|our|same)\s+$", re.I)
+_THE_BEFORE = re.compile(r"\b(?:the|of|this|that|our|same)\s+$", re.I)
 _DOC_WORDS = {"policy", "claim", "card", "scheme", "insurance", "form", "receipt", "bill", "invoice", "ticket",
               "token", "reference", "ref", "file", "case", "folio", "member", "beneficiary", "package", "amount",
               "status", "remarks", "remark", "comments", "comment", "approved", "rejected", "pending", "total"}

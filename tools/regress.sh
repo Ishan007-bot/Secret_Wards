@@ -7,6 +7,7 @@ KIT=$1; WORK=$2; EXTRA=${3:-}
 PY="python -X utf8"
 mkdir -p "$WORK"
 export RAKSHA_SECRET=regress-a
+$PY -c "import re,glob,sys; b=[f for f in glob.glob('**/*.py',recursive=True) if re.search('[\x00-\x08\x0b\x0c\x0e-\x1f]',open(f,encoding='utf-8').read())]; print('control chars in source:', b or 'none')"
 $PY -m unittest discover -s tests 2>&1 | tail -1
 $PY tools/audit_repo.py --kit "$KIT" | tail -1
 rm -rf "$WORK"/p_a "$WORK"/p_b "$WORK"/p_c

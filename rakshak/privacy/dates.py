@@ -22,6 +22,11 @@ _MON_RX = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|
           r"Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
 
 # numeric: 12/04/1977, 12-04-1977, 12.04.1977, 30/05/26 ; ISO: 1977-04-12 (+ optional time part)
+RX_YMD = re.compile(r"(?<![\d./-])(\d{4})([/.])(\d{1,2})\2(\d{1,2})(?![\d])")   # 1977/04/12, 1977.04.12
+_HI_MONTHS = ["जनवरी", "फरवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई", "अगस्त", "सितंबर", "अक्टूबर", "नवंबर", "दिसंबर"]
+_HI_ALT = {"फ़रवरी": 2, "सितम्बर": 9, "अक्तूबर": 10, "नवम्बर": 11, "दिसम्बर": 12, "अप्रेल": 4}
+RX_DMONY_HI = re.compile(r"(?<![\d])(\d{1,2})[ 	]+(" + "|".join(sorted(_HI_MONTHS + list(_HI_ALT), key=len, reverse=True))
+                         + r")(?:[ 	,]+(\d{4}))?")
 RX_ISO = re.compile(r"(?<![\d])(\d{4})-(\d{2})-(\d{2})(?![\d])")
 RX_NUM = re.compile(r"(?<![\d./-])(\d{1,2})([/.-])(\d{1,2})\2(\d{4}|\d{2})(?![\d])")
 RX_DMONY = re.compile(rf"(?<![A-Za-z\d])(\d{{1,2}})(?:st|nd|rd|th)?([\s-]){_MON_RX}\.?(?:\2(\d{{4}}))?(?![A-Za-z])", re.I)
@@ -118,6 +123,22 @@ def shift_all(text: str, days: int, month_first: bool) -> str:
         nd = _shift_date(int(m.group(1)), int(m.group(2)), int(m.group(3)), days)
         if nd:
             add(m.start(), m.end(), f"{nd.year:04d}-{nd.month:02d}-{nd.day:02d}")
+    for m in RX_YMD.finditer(norm):
+        y, sep, mo_s, d_s = int(m.group(1)), m.group(2), m.group(3), m.group(4)
+        if not _valid(y, int(mo_s), int(d_s)):
+            continue
+        nd = _shift_date(y, int(mo_s), int(d_s), days)
+        if nd:
+            add(m.start(), m.end(), f"{nd.year:04d}{sep}{nd.month:0{len(mo_s)}d}{sep}{nd.day:0{len(d_s)}d}")
+    for m in RX_DMONY_HI.finditer(norm):
+        mo = _HI_ALT.get(m.group(2)) or _HI_MONTHS.index(m.group(2)) + 1
+        y = int(m.group(3)) if m.group(3) else 2001
+        nd = _shift_date(y, mo, int(m.group(1)), days)
+        if nd:
+            out = f"{nd.day} {_HI_MONTHS[nd.month - 1]}"
+            if m.group(3):
+                out += norm[m.end(2):m.start(3)] + f"{nd.year:04d}"
+            add(m.start(), m.end(), out)
     for m in RX_NUM.finditer(norm):
         a, sep, b, ys = m.group(1), m.group(2), m.group(3), m.group(4)
         y = _year(ys)
@@ -148,13 +169,19 @@ def shift_all(text: str, days: int, month_first: bool) -> str:
             continue
         mon_out = _month_like(mon_txt, nd.month)
         sep = m.group(2)
-        out = f"{nd.day}{sep}{mon_out}" + (f"{sep}{nd.year:04d}" if m.group(3) else "")
+        ordm = re.match(r"\d{1,2}(st|nd|rd|th)", m.group(0), re.I)     # keep "12th" style ordinals
+        day = f"{nd.day}{_ordinal(nd.day, ordm.group(1))}" if ordm else f"{nd.day}"
+        mid = m.group(0)[ordm.end() if ordm else len(m.group(1)):m.start(2) - m.start()] if False else ""
+        out = f"{day}{mid}{sep}{mon_out}" + (f"{sep}{nd.year:04d}" if m.group(3) else "")
         add(m.start(), m.end(), out)
     for m in RX_MONDY.finditer(norm):
         mon_txt = re.match(_MON_RX, m.group(0), re.I).group(0)
         nd = _shift_date(int(m.group(2)), _mon_index(mon_txt), int(m.group(1)), days)
         if nd:
-            add(m.start(), m.end(), f"{_month_like(mon_txt, nd.month)} {nd.day}, {nd.year:04d}")
+            comma = "," if "," in m.group(0) else ""
+            ordm = re.search(r"\d(st|nd|rd|th)", m.group(0), re.I)
+            day = f"{nd.day}{_ordinal(nd.day, ordm.group(1))}" if ordm else f"{nd.day}"
+            add(m.start(), m.end(), f"{_month_like(mon_txt, nd.month)} {day}{comma} {nd.year:04d}")
 
     if not edits:
         return text
@@ -166,6 +193,11 @@ def shift_all(text: str, days: int, month_first: bool) -> str:
         pos = e
     out.append(text[pos:])
     return "".join(out)
+
+
+def _ordinal(day: int, template: str) -> str:
+    suf = "th" if 10 <= day % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return suf.upper() if template.isupper() else suf
 
 
 def _month_like(template: str, month: int) -> str:
@@ -183,6 +215,9 @@ def _month_like(template: str, month: int) -> str:
 def parse_one(value: str, month_first: bool) -> dt.date | None:
     """Parse a single date value (for DOB evidence); None if not a date."""
     v = ascii_digits(str(value)).strip()
+    m = RX_YMD.search(v)
+    if m and _valid(int(m.group(1)), int(m.group(3)), int(m.group(4))):
+        return dt.date(int(m.group(1)), int(m.group(3)), int(m.group(4)))
     m = RX_ISO.search(v)
     if m and _valid(int(m.group(1)), int(m.group(2)), int(m.group(3))):
         return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))

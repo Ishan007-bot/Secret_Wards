@@ -1,7 +1,9 @@
 """Decide how to treat a file from its extension AND its bytes (extensions lie)."""
 from __future__ import annotations
 
-SUPPORTED = {".csv": "csv", ".tsv": "tsv", ".json": "json", ".txt": "text"}
+SUPPORTED = {".csv": "csv", ".tsv": "tsv", ".psv": "csv", ".dsv": "csv", ".json": "json", ".txt": "text",
+             ".jsonl": "text", ".ndjson": "text", ".log": "text", ".md": "text", ".text": "text", ".note": "text",
+             ".notes": "text"}   # JSON Lines / logs / notes are sanitised as text (structure kept byte-for-byte)
 
 _MAGIC = (
     (b"%PDF", "pdf"),

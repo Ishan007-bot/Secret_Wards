@@ -272,3 +272,78 @@ class ForcedFailure(unittest.TestCase):                                 # T-DS-0
         self.assertNotIn("Tejasvi", blob)
         self.assertNotIn("9876501234", blob)
         self.assertFalse((tmp / "out" / "sanitized" / "a.txt").exists())
+
+
+class UnseenFormatHardening(unittest.TestCase):
+    """Regression tests for the unseen-format hardening (synthetic strings only)."""
+
+    def test_identifier_and_name_forms(self):
+        e = Engine()
+        cases = {"ph. 98765.43210": "98765.43210", "Tel: (0522) 2345678": "2345678",
+                 "Reg No. 2031/OPD/00456": "00456", "IP No 31/1234": "1234",
+                 "Policy no. HDFC/2031/778812": "778812", "Name: KHANNA, TEJAS": "TEJAS",
+                 "Smt. Kamla Rathi w/o Late Shri Ramdin": "Kamla", "Husband - Vinod Kumar Gupta": "Vinod",
+                 "Relative contacted: Sneha D'Souza": "Souza"}
+        for text, gone in cases.items():
+            self.assertNotIn(gone, e.clean(text), text)
+        for keep in ("Ref range 70-140 mg/dL", "Bill No: 445566", "Ward 4 (Medicine)", "Shri Ram Hospital, Lucknow",
+                     "Late onset diabetes", "hospital opd 2026 02 json", "Referred by ASHA worker of the village.",
+                     "of the village. TDS 0-0-1", "ICD-10 E11.9", "Son: 2 children"):
+            self.assertEqual(e.clean(keep), keep, keep)
+
+    def test_possessive_still_matches_vault(self):
+        e = Engine()
+        e.vault.add_name("Tejasvi Rathi", "PATIENT")
+        self.assertNotIn("Tejasvi", e.clean("Sample received from Tejasvi's attendant."))
+
+    def test_relative_name_stops_at_sentence_end(self):
+        e = Engine()
+        self.assertEqual(e.clean("C/O Ravi Kumar. ICD-10 E11.9"), "C/O [RELATIVE]. ICD-10 E11.9")
+
+    def test_date_formats_shifted_and_kept(self):
+        from rakshak.privacy.dates import shift_all
+        self.assertEqual(shift_all("1977/04/12", 10, False), "1977/04/22")
+        self.assertEqual(shift_all("1977.04.12", 10, False), "1977.04.22")
+        self.assertEqual(shift_all("12th April 1977", 10, False), "22nd April 1977")
+        self.assertEqual(shift_all("Apr 12 1977", 10, False), "Apr 22 1977")
+        self.assertEqual(shift_all("12 अप्रैल 1977", 10, False), "22 अप्रैल 1977")
+
+    def test_hex_and_base64_payloads(self):
+        from rakshak.process import Processor
+        p = Processor(Engine())
+        hx = "Patient Tejasvi Rathi phone 9876501234".encode().hex()
+        b64 = base64.b64encode("Patient Tejasvi Rathi phone 9876501234".encode()).decode()
+        text = f"hex {hx}\nb64 {b64}\nuuid 3f2a9c1e-1111-2222-3333-444444444444"
+        p.text_harvest(text)
+        out = p.text_rewrite(text)
+        import re
+        dec = bytes.fromhex(re.search(r"hex ([0-9a-f]+)", out).group(1)).decode()
+        dec += base64.b64decode(re.search(r"b64 (\S+)", out).group(1)).decode()
+        self.assertNotIn("Tejasvi", dec)
+        self.assertNotIn("9876501234", dec)
+        self.assertIn("3f2a9c1e-1111-2222-3333-444444444444", out)
+
+    def test_delimiters_formats_and_shared_documents(self):
+        tmp = Path(tempfile.mkdtemp())
+        inp = tmp / "in"
+        inp.mkdir()
+        (inp / "semi.csv").write_text("Patient Name;Mobile;Village\nKeshav Rathi;9876543210;Daulatganj\n"
+                                      "Nirmala Joshi;8765432109;Kesharganj\n", encoding="utf-8")
+        (inp / "piped.psv").write_text("Naam|Phone\nKeshav Rathi|9876543210\n", encoding="utf-8")
+        (inp / "visits.json").write_text('{"patient": "Keshav Rathi", "phone": "9876543210"}\n'
+                                         '{"patient": "Nirmala Joshi", "phone": "8765432109"}\n', encoding="utf-8")
+        (inp / "desk.log").write_text("called by Keshav Rathi 9876543210\n", encoding="utf-8")
+        env = dict(os.environ, RAKSHA_SECRET="fmt-secret")
+        r = subprocess.run([sys.executable, str(ROOT / "main.py"), "--input", str(inp), "--output", str(tmp / "out")],
+                           env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rep = json.loads((tmp / "out" / "report.json").read_text(encoding="utf-8"))
+        self.assertTrue(all(e["status"] == "sanitized" for e in rep["files"]))
+        semi = (tmp / "out" / "sanitized" / "semi.csv").read_text(encoding="utf-8")
+        self.assertTrue(semi.startswith("Patient Name;Mobile;Village"))
+        blob = "".join(p.read_text(encoding="utf-8") for p in (tmp / "out" / "sanitized").iterdir())
+        for v in ("Keshav", "Nirmala", "9876543210", "Daulatganj"):
+            self.assertNotIn(v, blob)
+        lines = (tmp / "out" / "sanitized" / "visits.json").read_text(encoding="utf-8").splitlines()
+        psn = [json.loads(l)["patient"] for l in lines]
+        self.assertNotEqual(psn[0], psn[1])          # two people in one file never share a pseudonym

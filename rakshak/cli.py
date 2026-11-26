@@ -26,6 +26,7 @@ from .formats import csv_tsv, fhir, json_doc
 from .link.context import RecordCtx
 from .link.linker import Linker
 from .link.pseudonym import PseudonymIssuer
+from .link.translit import names_compatible
 from .privacy.ages import band_text
 from .privacy.dates import Shifter, order_evidence
 from .secure.egress import find_leaks
@@ -55,6 +56,7 @@ class Job:
     records: list = field(default_factory=list)
     month_first: bool = False    # date order of this file (decided from evidence)
     family: str = ""             # hospital ID family (for date-order voting)
+    delim: str = ","             # CSV/TSV delimiter the file really uses (sniffed)
 
 
 def discover(inp: Path) -> list[Path]:
@@ -71,19 +73,33 @@ def load(path: Path, rel: str) -> Job:
             raise Quarantine("undecodable_text")
         job.text, job.encoding = text, enc
         if job.kind in ("csv", "tsv"):
-            job.data = csv_tsv.parse(text, "\t" if job.kind == "tsv" else ",")
+            default = "\t" if job.kind == "tsv" else ("|" if path.suffix.lower() == ".psv" else ",")
+            job.delim = csv_tsv.sniff_delimiter(text, default)     # ';' or '|' inside a .csv, ...
+            job.data = csv_tsv.parse(text, job.delim)
         elif job.kind == "json":
             if json_depth_exceeds(text, int(POLICY["max_json_depth"])):
                 raise Quarantine("nesting_too_deep")
             try:
                 job.data = json.loads(text)
             except ValueError:
-                raise Quarantine("malformed_json") from None
+                if not _json_lines(text):
+                    raise Quarantine("malformed_json") from None
+                job.kind = "text"            # JSON Lines saved as .json: sanitised line by line as text
     except Quarantine as q:
         job.status, job.reason = "quarantined", q.reason
     except (csv.Error, UnicodeError, RecursionError, MemoryError) as exc:
         job.status, job.reason = "quarantined", "parse_error_" + log.error_kind(exc).lower()
     return job
+
+
+def _json_lines(text: str) -> bool:
+    lines = [l for l in text.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return False
+    try:
+        return all(isinstance(json.loads(l), (dict, list)) for l in lines)
+    except ValueError:
+        return False
 
 
 def harvest(job: Job, proc: Processor) -> None:
@@ -176,7 +192,11 @@ def build_contexts(jobs: list[Job], evs: dict, proc: Processor) -> dict:
     month_first = {job.rel: job.month_first for job in jobs}
     ctxs = {}
     for k, members in by_cluster.items():
-        names = [n for e in members for n in e.names + e.weak_names]
+        # the cluster's own names: each record's primary name and its spelling variants only. Other people
+        # mentioned in the same document (a register, a log, JSON Lines) must never receive this pseudonym.
+        primaries = [p for p in (e.primary_name() for e in members) if p]
+        names = [n for e in members for n in e.names + e.weak_names
+                 if not primaries or any(names_compatible(n, p) for p in primaries)]
         ids = set()
         for e in members:
             ids |= e.ids
@@ -262,7 +282,7 @@ def rewrite(job: Job, proc: Processor, ctxs: dict) -> None:
         return ctxs.get(f"{job.rel}|{loc}") or RecordCtx()
 
     if job.kind in ("csv", "tsv"):
-        delim = "\t" if job.kind == "tsv" else ","
+        delim = job.delim
         rows = job.data
         recs = [rec_for(f"row:{i}") for i in range(max(0, len(rows) - 1))]
         job.output_text = (csv_tsv.write(proc.csv_rewrite(rows, recs), delim, csv_tsv.line_terminator(job.text))
