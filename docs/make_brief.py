@@ -149,7 +149,7 @@ def main():
         ["A4: patients confidently re-identified", "8.3% (raw: 97.9%)", "n/a"],
         ["A3 record linkage / A5 targeted (vs raw)", "4.3% / 68%", "n/a"],
         ["Known visit dates still visible", "0 / 14 (raw: 14 / 14)", "n/a"],
-        ["Run time / peak memory", "3–8 s / 30 MB; 1,600 files: 42 s / 90 MB", "same"],
+        ["Run time / peak memory", "3–5 s / 30 MB; 1,600 files: 23 s / 92 MB", "same"],
         ["Projected score (our scorer re-implementation)", "94.5 / 100, no penalties", "73.0 / 75 excl. privacy"],
     ], [W * 0.43, W * 0.31, W * 0.26])]))
     s.append(Spacer(1, 3))

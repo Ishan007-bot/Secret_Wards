@@ -234,6 +234,21 @@ class Engine:
     def find(self, text: str, crf: bool = True) -> list[Span]:
         if not text:
             return []
+        cv = self.vault.compiled()
+        cache = self.__dict__.setdefault("_find_cache", {})
+        if cache.get("__cv__") is not cv:            # the vault changed: results may differ
+            cache.clear()
+            cache["__cv__"] = cv
+        key = (text, crf)
+        hit = cache.get(key)
+        if hit is None:
+            if len(cache) > 200000:
+                cache.clear()
+                cache["__cv__"] = cv
+            hit = cache[key] = self._find(text, crf)
+        return list(hit)
+
+    def _find(self, text: str, crf: bool = True) -> list[Span]:
         norm = ascii_digits(text)
         spans: list[Span] = []
         add = spans.append

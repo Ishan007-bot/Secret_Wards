@@ -140,7 +140,7 @@ Pseudonyms are `PSN-` plus 8 Crockford base-32 characters from **HMAC-SHA256(sec
 | planted canaries found | **0 / 4** |
 | medical values kept | **99.6%** (4,835 / 4,855) |
 | linking precision / recall / F0.5 | **1.00 / 1.00 / 1.00** (0 wrong merges; homonym, language and fragment traps all correct) |
-| run time / peak memory | about 3–8 s / 30 MB (practice); 1,600 files: 42 s / 90 MB |
+| run time / peak memory | about 3–5 s / 30 MB (practice); 1,600 files: 23 s / 92 MB; 8 MB of Synthea FHIR: 13 s |
 | determinism | byte-identical across runs and across Windows / Linux (Docker) |
 
 **Re-identification, measured with our re-implementation of the published A1–A7 attacker** (`tools/attacker.py`):

@@ -35,9 +35,11 @@ def find_leaks(text: str, vault) -> int:
     form = scan_form(raw)
     hits = 0
     cv = vault.compiled()
-    uuids = [(u.start(), u.end()) for u in _UUID.finditer(form)]   # random resource ids: never personal
+    in_uuid = bytearray(len(form) + 1)                                # random resource ids: never personal
+    for u in _UUID.finditer(form):
+        in_uuid[u.start():u.end()] = b"" * (u.end() - u.start())
     for m in _DIGIT_RUN.finditer(form):
-        if uuids and any(us <= m.start() and m.end() <= ue for us, ue in uuids):
+        if in_uuid[m.start()] and in_uuid[m.end() - 1]:
             continue
         d = re.sub(r"\D", "", m.group(0))
         kind = cv.digits.get(d) or (cv.digits.get(d[-10:]) if len(d) in (11, 12) else None)

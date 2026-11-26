@@ -133,6 +133,8 @@ class Processor:
             self.evidence_from_text(ev, decoded if decoded is not None else v, month_first)
 
     def evidence_from_text(self, ev: Evidence, text: str, month_first: bool) -> None:
+        if _INERT.fullmatch(text):
+            return
         text = unhide(text)
         self.rare.observe_text(text)
         ev.dx |= {m.group(1).upper() for m in RX_ICD.finditer(text)}
@@ -229,6 +231,8 @@ class Processor:
         if role == C.DATE and isinstance(value, str):
             return eng.clean(value, rec=rec)
         # KEEP, TEXT, RELATION, GENDER, TEHSIL, DISTRICT, STATE: full detection on strings
+        if isinstance(value, str) and _INERT.fullmatch(value):
+            return value          # URL / URN / UUID / lowercase code word: cannot hold PII (egress gate re-checks)
         if isinstance(value, str):
             decoded = decode_b64_text(value)
             if decoded is not None:
@@ -414,7 +418,10 @@ class Processor:
         return self.rewrite(role, node, ctx, cur)
 
     def _clean_key(self, key: str, taken: dict) -> str:
-        new = self.engine.clean(key)
+        cache = self.__dict__.setdefault("_key_cache", {})
+        new = cache.get(key)
+        if new is None:
+            new = cache[key] = self.engine.clean(key)
         if new != key:
             base, i = new, 2
             while new in taken:
@@ -452,6 +459,8 @@ class Processor:
         return any(s.kind != "AGE" for s in spans)
 
 
+_INERT = re.compile(r"(?:https?://|urn:(?:oid|uuid):)[A-Za-z0-9./#:_-]*[A-Za-z/#._-]|"
+                    r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[a-z][a-z-]{0,29}")
 _GEO_KEYS = {"lat", "lng", "lon", "long", "latitude", "longitude"}
 
 
