@@ -216,7 +216,7 @@ def build_contexts(jobs: list[Job], evs: dict, proc: Processor) -> dict:
         if k:
             for code in e.dx:
                 holders.setdefault(code, set()).add(k)
-    _k_anonymity(by_cluster, ctxs)
+    proc.k_stats = _k_anonymity(by_cluster, ctxs)
     k_dx = int(POLICY["rare_diagnosis_k"])
     proc.rare.set_rare({c for c, h in holders.items() if len(h) < k_dx})
     return ctxs
@@ -237,12 +237,36 @@ def _k_anonymity(by_cluster: dict, ctxs: dict) -> None:
         cell = (genders[0] if len(genders) == 1 else "?", band_text(str(ages[0])) or "?",
                 dists[0] if len(dists) == 1 else "?")
         cells.setdefault(cell, []).append(key)
+    widened = set()
     for cell, keys in cells.items():
         if len(keys) < k:
             for key in keys:
+                widened.add(key)
                 for e in by_cluster[key]:
                     if e.rid in ctxs:
                         ctxs[e.rid].age_width = wide
+    # measured re-identification risk of the release (counts only, no values): re-build the cells with
+    # the bands that are actually released and report how many patients remain in small cells
+    after: dict[tuple, int] = {}
+    for cell, keys in cells.items():
+        for key in keys:
+            ages = sorted({a for e in by_cluster[key] for a in e.ages})
+            band = band_text(str(ages[0]), wide) if key in widened else cell[1]
+            c2 = (cell[0], band or "?", cell[2])
+            after[c2] = after.get(c2, 0) + 1
+    n = sum(len(v) for v in cells.values())
+    sizes_after = [after[c] for c in after for _ in range(after[c])]
+    return {
+        "method": "k-anonymity of each pseudonymised patient on the released (gender, age band, district), "
+                  "measured inside this release only (a population registry gives every patient more candidates)",
+        "k_target": k,
+        "patients_assessed": n,
+        "patients_in_cells_below_k_before": sum(len(v) for v in cells.values() if len(v) < k),
+        "patients_given_wider_band": len(widened),
+        "patients_in_cells_below_k_after": sum(s for s in after.values() if s < k),
+        "patients_unique_after": sum(1 for s in after.values() if s == 1),
+        "median_cell_size_after": sorted(sizes_after)[len(sizes_after) // 2] if sizes_after else 0,
+    }
 
 
 def egress_gate(job: Job, proc: Processor, gate: Counter) -> None:
@@ -373,7 +397,15 @@ def run(inp: Path, out: Path) -> dict:
                         seconds=time.monotonic() - t0,
                         extra={"egress_gate": {"files_rechecked": gate["rechecked"],
                                                "files_blocked": gate["blocked"]},
-                               "patients_pseudonymised": getattr(proc, "linked_clusters", 0)})
+                               "patients_pseudonymised": getattr(proc, "linked_clusters", 0),
+                               "privacy_assessment": {
+                                   **(getattr(proc, "k_stats", None) or {}),
+                                   "rare_diagnosis_codes_generalised": len(proc.rare.rare_codes),
+                                   "date_shift": f"per patient, secret, {POLICY['date_shift_min_days']}-"
+                                                 f"{POLICY['date_shift_max_days']} days, never 0",
+                                   "dob": POLICY["dob_mode"],
+                                   "location_level": POLICY["location_level"]},
+                               "detection_layers": dict(sorted(engine.src_counts.items()))})
 
 
 def main(argv: list[str] | None = None) -> int:

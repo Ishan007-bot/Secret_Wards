@@ -221,6 +221,7 @@ class Engine:
     def __init__(self, vault: Vault | None = None):
         self.vault = vault or Vault()
         self.counts: Counter = Counter()
+        self.src_counts: Counter = Counter()      # spans removed per detection layer (counts only)
 
     # ------------------------------------------------------------------ pass 1: harvest from labelled text
     def harvest_text(self, text: str) -> None:
@@ -419,6 +420,7 @@ class Engine:
             out.append(shift(text[pos:sp.start]))
             out.append(self._replacement(sp, text[sp.start:sp.end], rec))
             self.counts[sp.kind] += 1
+            self.src_counts[_LAYER.get(sp.src, sp.src)] += 1
             pos = sp.end
             if sp.kind in ("PATIENT", "RELATIVE"):
                 # "Ojas Bhaiya", "Charvi ji": the kinship/honorific word is part of the name mention
@@ -533,6 +535,10 @@ _SENTENCE = re.compile(r"[a-zऀ-ॿ]{3,}")
 _SURNAME_FIRST = re.compile(r",[ \t]*([A-Z][A-Za-z]+|[A-Z]+)(?=[ \t]*(?:$|[\n,;|(]|[ \t]{2}))", re.M)
 _SENTENCE_END = re.compile(r"(?<=[a-z]{3})\.(?=[ 	])")
 _THE_BEFORE = re.compile(r"\b(?:the|of|this|that|our|same)\s+$", re.I)
+_LAYER = {"pattern": "L1_patterns", "shape": "L1_learned_id_shapes", "digits": "L2_vault_identifiers",
+          "vault_full": "L2_vault_names", "vault_tok": "L2_vault_names", "vault_text": "L2_vault_addresses",
+          "label": "L3_context_rules", "age": "L3_age_bands", "proximity": "L3_phone_proximity",
+          "crf": "L4_crf_tagger"}
 _DOC_WORDS = {"policy", "claim", "card", "scheme", "insurance", "form", "receipt", "bill", "invoice", "ticket",
               "token", "reference", "ref", "file", "case", "folio", "member", "beneficiary", "package", "amount",
               "status", "remarks", "remark", "comments", "comment", "approved", "rejected", "pending", "total"}
