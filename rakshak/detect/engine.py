@@ -199,6 +199,8 @@ def _looks_like_name(value: str) -> bool:
     return words[0][:1].isupper()
 
 
+_GEN_AFTER = re.compile(r"[ 	]+(?:Kumar|Kumari|Singh|Devi|Kaur|Lal|Prasad|Bano|Begum|Khatoon|Khatun|Bibi|Rani|"
+                        r"Nath|Chand|Das|KUMAR|SINGH|DEVI|KAUR)(?![\wऀ-ॿ])")
 _HON_AFTER = re.compile(r"[ 	]+(?:%s)(?![\wऀ-ॿ])" % "|".join(
     re.escape(h) for h in sorted(L.HONORIFICS_AFTER, key=len, reverse=True)), re.I)
 
@@ -309,7 +311,11 @@ class Engine:
         for m in RX_RELATION.finditer(text):
             marker = m.group(0)[:3].lower()
             if _relation_ok(marker, m.group(1)):
-                yield "RELATIVE", (m.start(1), m.end(1))
+                end = m.end(1)
+                stop = _SENTENCE_END.search(m.group(1))       # "C/O Ravi Kumar. ICD-10 ..." ends at the full stop
+                if stop:
+                    end = m.start(1) + stop.start()
+                yield "RELATIVE", (m.start(1), end)
         for m in RX_RELATION_DEVA.finditer(text):
             toks = m.group(1).split()
             if toks and not any(t in _HINDI_FUNCTION_WORDS for t in toks):
@@ -340,6 +346,10 @@ class Engine:
         for m in RX_VILL_LABEL.finditer(text):
             if _VILLAGE_BAD_BEFORE.search(text[max(0, m.start() - 4):m.start()]):
                 continue  # "1 gram ..." is a dose, not a village
+            lbl = m.group(0).rstrip()
+            if (lbl.endswith(".") and not re.match(r"vill\.", lbl, re.I)) or _THE_BEFORE.search(
+                    text[max(0, m.start() - 8):m.start()]):
+                continue  # "... of the village. TDS 0-0-1": a sentence end / common noun, not a label
             s, e = _cut_value(text[m.end():])
             val = text[m.end() + s:m.end() + e]
             if val and not re.search(r"\d", val) and val.split()[0].lower() not in L.CLINICAL_WORDS:
@@ -372,7 +382,7 @@ class Engine:
             pos = sp.end
             if sp.kind in ("PATIENT", "RELATIVE"):
                 # "Ojas Bhaiya", "Charvi ji": the kinship/honorific word is part of the name mention
-                m = _HON_AFTER.match(text, pos)
+                m = _HON_AFTER.match(text, pos) or _GEN_AFTER.match(text, pos)
                 if m and (i + 1 >= len(spans) or spans[i + 1].start >= m.end()):
                     pos = m.end()
         out.append(shift(text[pos:]))
@@ -480,6 +490,8 @@ def _region_word(w: str) -> bool:
 
 
 _SENTENCE = re.compile(r"[a-zऀ-ॿ]{3,}")
+_SENTENCE_END = re.compile(r"(?<=[a-z]{3})\.(?=[ 	])")
+_THE_BEFORE = re.compile(r"(?:the|of|this|that|our|same)\s+$", re.I)
 _CRF_KIND = {"NAME": "NAME", "ADDR": "ADDRESS"}
 _DEVA_CUE = re.compile(r"(?:नाम|मरीज़?|रोगी|पिता|पति|पत्नी|माता|पुत्र|पुत्री|पता|ग्राम|गाँव|गांव|मोहल्ला|मकान|श्री|श्रीमती|"
                        r"S/o|W/o|D/o|C/O)\s*(?:का|की|के)?\s*(?:नाम)?\s*[:\-]?\s*$")

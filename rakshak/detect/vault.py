@@ -55,7 +55,7 @@ class Vault:
     def add_text(self, value: str, kind: str) -> None:
         v = re.sub(r"\s+", " ", str(value)).strip(" ,.;:-")
         f = fold(v)
-        if f in _JUNK or len(f) < 3 or f in L.REGION_WORDS or _ADDR_GENERIC.match(f):
+        if f in _JUNK or len(f) < 3 or (f in L.REGION_WORDS and kind != "VILLAGE") or _ADDR_GENERIC.match(f):
             return
         if f.isdigit():
             return
@@ -149,7 +149,20 @@ def id_shape(value: str) -> str | None:
 
 
 _UUID_ID = re.compile(r"(?:urn:uuid:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-_WORD = re.compile(r"[A-Za-z0-9]+|[ऀ-ॣ०-ॿ]+")
+# text side: an apostrophe joins a name only before a capital (D'Souza, O'Brien); "Asha's" stays Asha + s
+_WORD = re.compile(r"[A-Za-z0-9]+(?:['’][A-Z][A-Za-z]*)*|[ऀ-ॣ०-ॿ]+")
+# stored (lower-case) side: any apostrophe joins
+_WORD_KEY = re.compile(r"[A-Za-z0-9]+(?:['’][A-Za-z]+)*|[ऀ-ॣ०-ॿ]+")
+
+
+def _key(w: str) -> str:
+    return w.replace("'", "").replace("’", "").casefold()
+def _name_case(w: str) -> bool:
+    """Title or UPPER case, per apostrophe part: Ramesh, RAMESH, D'Souza, O'Brien."""
+    parts = re.split(r"['’]", w)
+    return all(p and p[0].isupper() and (p[1:].islower() or p.isupper() or not p[1:]) for p in parts) or w.isupper()
+
+
 _GAP = re.compile(r"[\s_.,\-]*")
 
 
@@ -176,12 +189,12 @@ class _Compiled:
             for p, kind in store.items():
                 if src == "vault_text" and p in v.keep:
                     continue
-                toks = tuple(t.casefold() for t in _WORD.findall(p))
+                toks = tuple(_key(t) for t in _WORD_KEY.findall(p))
                 if toks:
                     self.phrases.setdefault(toks[0], []).append((toks, kind, src))
         for lst in self.phrases.values():
             lst.sort(key=lambda x: -len(x[0]))
-        self.single = dict(v.name_tokens)
+        self.single = {_key(k): kind for k, kind in v.name_tokens.items()}
 
         shapes = sorted(v.id_shapes, key=lambda s: (-len(s), s))
         self.shape_rx = (re.compile(r"(?<![A-Za-z0-9])(?:%s)(?![A-Za-z0-9])" % "|".join(shapes), re.I)
@@ -194,7 +207,7 @@ class _Compiled:
         (start, end, kind, src). Words are compared case-insensitively; between the words of a phrase
         only separators (space, _, ., comma, -) may appear. Single Latin tokens must be Title/UPPER case."""
         words = [(m.start(), m.end(), m.group(0)) for m in _WORD.finditer(text)]
-        low = [w[2].casefold() for w in words]
+        low = [_key(w[2]) for w in words]
         out = []
         n = len(words)
         for i, (s, e, w) in enumerate(words):
@@ -205,6 +218,6 @@ class _Compiled:
                     out.append((s, words[i + k - 1][1], kind, src))
                     break
             kind = self.single.get(low[i])
-            if kind and (is_devanagari(w) or (w[0].isupper() and (w[1:].islower() or w.isupper()))):
+            if kind and (is_devanagari(w) or _name_case(w)):
                 out.append((s, e, kind, "vault_tok"))
         return out

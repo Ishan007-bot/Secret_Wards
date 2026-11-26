@@ -432,6 +432,8 @@ class Processor:
     # ====================================================================== text
     def text_harvest(self, text: str) -> None:
         self.engine.harvest_text(text)
+        for _m, decoded in _b64_tokens(text):
+            self.engine.harvest_text(decoded)
 
     def text_evidence(self, text: str, rel: str, month_first: bool) -> list[Evidence]:
         ev = Evidence(rid=f"{rel}|doc")
@@ -439,7 +441,14 @@ class Processor:
         return [ev]
 
     def text_rewrite(self, text: str, rec: RecordCtx | None = None) -> str:
-        return self._coarsen(self.engine.clean(text, rec=rec), rec)
+        parts, pos = [], 0
+        for m, decoded in _b64_tokens(text):            # base64 blobs inside a note: decode, clean, re-encode
+            parts.append(self._coarsen(self.engine.clean(text[pos:m.start()], rec=rec), rec))
+            cleaned = self._coarsen(self.engine.clean(decoded, rec=rec), rec)
+            parts.append(encode_b64_text(cleaned) if cleaned != decoded else m.group(0))
+            pos = m.end()
+        parts.append(self._coarsen(self.engine.clean(text[pos:], rec=rec), rec))
+        return "".join(parts)
 
     def _coarsen(self, text: str, rec: RecordCtx | None) -> str:
         """Rare diagnoses -> ICD chapter, only inside a patient's record."""
@@ -461,6 +470,22 @@ class Processor:
 
 _INERT = re.compile(r"(?:https?://|urn:(?:oid|uuid):)[A-Za-z0-9./#:_-]*[A-Za-z/#._-]|"
                     r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[a-z][a-z-]{0,29}")
+_B64_TOKEN = re.compile(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{24,}={0,2}(?![A-Za-z0-9+/=])")
+
+
+def _b64_tokens(text: str):
+    """(match, decoded text) for standalone base64 tokens that decode to readable UTF-8 text."""
+    if len(text) < 24:
+        return
+    for m in _B64_TOKEN.finditer(text):
+        tok = m.group(0)
+        if not (re.search(r"[a-z]", tok) and re.search(r"[A-Z]", tok) and re.search(r"\d", tok)):
+            continue
+        decoded = decode_b64_text(tok)
+        if decoded and sum(c.isprintable() or c in "\n\t" for c in decoded) >= 0.95 * len(decoded):
+            yield m, decoded
+
+
 _GEO_KEYS = {"lat", "lng", "lon", "long", "latitude", "longitude"}
 
 
